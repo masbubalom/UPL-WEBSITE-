@@ -1,5 +1,8 @@
 import os, re, secrets
 import psycopg
+import cloudinary
+import cloudinary.uploader
+from cloudinary.utils import cloudinary_url
 from psycopg.rows import dict_row
 from pathlib import Path
 from functools import wraps
@@ -9,6 +12,16 @@ from werkzeug.security import check_password_hash
 BASE = Path(__file__).resolve().parent
 DATABASE_URL = os.environ["DATABASE_URL"]
 
+# ---------- Cloudinary ----------
+cloudinary.config(
+    cloud_name=os.environ["CLOUDINARY_CLOUD_NAME"],
+    api_key=os.environ["CLOUDINARY_API_KEY"],
+    api_secret=os.environ["CLOUDINARY_API_SECRET"],
+    secure=True
+)
+
+# Legacy/local uploads folder.
+# New photos will go to Cloudinary.
 UPLOADS = BASE / "uploads"
 UPLOADS.mkdir(exist_ok=True)
 
@@ -210,9 +223,15 @@ def register():
             name
         )[:40]
 
-        filename = f"{reg}_{safe}{ext}"
+        # Upload player photo to Cloudinary
+        upload_result = cloudinary.uploader.upload(
+            photo,
+            folder="upl/players",
+            public_id=f"{reg}_{safe}",
+            resource_type="image"
+        )
 
-        photo.save(UPLOADS / filename)
+        photo_url = upload_result["secure_url"]
 
         c.execute(
             """
@@ -245,7 +264,7 @@ def register():
                 role,
                 bat,
                 bowl,
-                filename
+                photo_url
             )
         )
 
@@ -264,7 +283,7 @@ def register():
             error="This phone number or e-mail is already registered."
         ), 409
 
-    except Exception as e:
+    except Exception:
         c.rollback()
 
         return jsonify(
@@ -390,6 +409,8 @@ def gallery():
     )
 
 
+# ---------- Legacy local uploads ----------
+# This keeps old local-image URLs working if the file still exists.
 @app.get("/uploads/<path:filename>")
 def uploaded(filename):
     return send_from_directory(
@@ -469,6 +490,13 @@ def admin():
         """
     ).fetchall()
 
+    gallery = c.execute(
+        """
+        SELECT * FROM gallery
+        ORDER BY id DESC
+        """
+    ).fetchall()
+
     c.close()
 
     return render_template(
@@ -477,7 +505,8 @@ def admin():
         teams=teams,
         fixtures=fixtures,
         news=news,
-        points=points
+        points=points,
+        gallery=gallery
     )
 
 
@@ -754,45 +783,52 @@ def gallery_add():
         ""
     ).strip()
 
-    if f and f.filename:
+    if not f or not f.filename:
+        return redirect("/admin")
 
-        ext = Path(
-            f.filename
-        ).suffix.lower()
+    ext = Path(f.filename).suffix.lower()
 
-        if ext in {
-            ".jpg",
-            ".jpeg",
-            ".png",
-            ".webp"
-        }:
+    if ext not in {
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".webp"
+    }:
+        return redirect("/admin")
 
-            name = (
-                f"GAL-"
-                f"{secrets.token_hex(6)}"
-                f"{ext}"
+    try:
+        # Upload gallery image to Cloudinary
+        upload_result = cloudinary.uploader.upload(
+            f,
+            folder="upl/gallery",
+            resource_type="image"
+        )
+
+        image_url = upload_result["secure_url"]
+
+        c = db()
+
+        c.execute(
+            """
+            INSERT INTO gallery
+            (title,image_path)
+            VALUES(?,?)
+            """,
+            (
+                title,
+                image_url
             )
+        )
 
-            f.save(
-                UPLOADS / name
-            )
+        c.commit()
+        c.close()
 
-            c = db()
-
-            c.execute(
-                """
-                INSERT INTO gallery
-                (title,image_path)
-                VALUES(?,?)
-                """,
-                (
-                    title,
-                    name
-                )
-            )
-
-            c.commit()
+    except Exception:
+        try:
+            c.rollback()
             c.close()
+        except Exception:
+            pass
 
     return redirect("/admin")
 
@@ -812,17 +848,9 @@ def gallery_delete(id):
         (id,)
     ).fetchone()
 
-    if row:
-
-        try:
-            (
-                UPLOADS / row["image_path"]
-            ).unlink(
-                missing_ok=True
-            )
-        except Exception:
-            pass
-
+    # Delete database record.
+    # Cloudinary image is intentionally kept for now
+    # so we don't accidentally delete a useful image.
     c.execute(
         "DELETE FROM gallery WHERE id=?",
         (id,)
