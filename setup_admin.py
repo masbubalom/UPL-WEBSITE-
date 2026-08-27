@@ -1,4 +1,3 @@
-
 import os
 import psycopg
 from werkzeug.security import generate_password_hash
@@ -6,6 +5,7 @@ from werkzeug.security import generate_password_hash
 DATABASE_URL = os.environ["DATABASE_URL"]
 
 with psycopg.connect(DATABASE_URL) as c:
+
     c.execute("""
         CREATE TABLE IF NOT EXISTS admins (
             id SERIAL PRIMARY KEY,
@@ -70,21 +70,77 @@ with psycopg.connect(DATABASE_URL) as c:
             title TEXT,
             image_path TEXT
         );
+
+        /* =========================================
+           TEAM INTEREST REGISTRATION
+           ========================================= */
+
+        CREATE TABLE IF NOT EXISTS team_interest (
+            id SERIAL PRIMARY KEY,
+
+            interest_no TEXT UNIQUE NOT NULL,
+
+            team_name TEXT NOT NULL,
+
+            representative_name TEXT NOT NULL,
+
+            phone TEXT NOT NULL,
+
+            email TEXT NOT NULL,
+
+            village TEXT NOT NULL,
+
+            gram_panchayat TEXT NOT NULL,
+
+            interest_amount INTEGER DEFAULT 100,
+
+            payment_status TEXT DEFAULT 'Pending',
+
+            payment_reference TEXT,
+
+            status TEXT DEFAULT 'Pending',
+
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
     """)
 
-    user = os.environ.get("UPL_ADMIN_USER", "admin")
-    password = os.environ.get("UPL_ADMIN_PASSWORD")
+    # -----------------------------------------
+    # ADMIN ACCOUNT
+    # -----------------------------------------
+
+    user = os.environ.get(
+        "UPL_ADMIN_USER",
+        "admin"
+    )
+
+    password = os.environ.get(
+        "UPL_ADMIN_PASSWORD"
+    )
 
     if not password:
-        raise SystemExit("Set UPL_ADMIN_PASSWORD first.")
+        raise SystemExit(
+            "Set UPL_ADMIN_PASSWORD first."
+        )
 
     c.execute("""
-        INSERT INTO admins(username, password_hash)
+        INSERT INTO admins(
+            username,
+            password_hash
+        )
         VALUES (%s, %s)
+
         ON CONFLICT(username)
-        DO UPDATE SET password_hash = EXCLUDED.password_hash
-    """, (user, generate_password_hash(password)))
+        DO UPDATE SET
+            password_hash =
+            EXCLUDED.password_hash
+    """, (
+        user,
+        generate_password_hash(password)
+    ))
 
     c.commit()
 
-print("PostgreSQL database and admin account configured.")
+
+print(
+    "PostgreSQL database and admin account configured."
+)
