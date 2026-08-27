@@ -1,14 +1,13 @@
 import os
 import re
 import secrets
+from pathlib import Path
+from functools import wraps
 
 import psycopg
 import cloudinary
 import cloudinary.uploader
-
 from psycopg.rows import dict_row
-from pathlib import Path
-from functools import wraps
 
 from flask import (
     Flask,
@@ -16,60 +15,49 @@ from flask import (
     jsonify,
     session,
     redirect,
-    send_from_directory,
-    render_template
+    render_template,
 )
 
 from werkzeug.security import check_password_hash
 
 
-# =========================================================
-# CONFIGURATION
-# =========================================================
+# ============================================================
+# BASIC CONFIG
+# ============================================================
 
 BASE = Path(__file__).resolve().parent
 
 DATABASE_URL = os.environ["DATABASE_URL"]
 
-
-# =========================================================
-# CLOUDINARY
-# =========================================================
-
-cloudinary.config(
-    cloud_name=os.environ["CLOUDINARY_CLOUD_NAME"],
-    api_key=os.environ["CLOUDINARY_API_KEY"],
-    api_secret=os.environ["CLOUDINARY_API_SECRET"],
-    secure=True
-)
-
-
-# Legacy/local uploads folder
-UPLOADS = BASE / "uploads"
-UPLOADS.mkdir(exist_ok=True)
-
-
-# =========================================================
-# FLASK
-# =========================================================
-
 app = Flask(
     __name__,
     static_folder="static",
-    template_folder="templates"
+    template_folder="templates",
 )
 
 app.secret_key = os.environ.get(
     "UPL_SECRET_KEY",
-    secrets.token_hex(32)
+    secrets.token_hex(32),
 )
 
 app.config["MAX_CONTENT_LENGTH"] = 8 * 1024 * 1024
 
 
-# =========================================================
-# CONSTANTS
-# =========================================================
+# ============================================================
+# CLOUDINARY
+# ============================================================
+
+cloudinary.config(
+    cloud_name=os.environ.get("CLOUDINARY_CLOUD_NAME"),
+    api_key=os.environ.get("CLOUDINARY_API_KEY"),
+    api_secret=os.environ.get("CLOUDINARY_API_SECRET"),
+    secure=True,
+)
+
+
+# ============================================================
+# UPL DATA
+# ============================================================
 
 PANCHAYATS = [
     "Uttar Laxmipur",
@@ -80,52 +68,43 @@ PANCHAYATS = [
     "Bangitola",
     "Rathbari",
     "Hamidpur",
-    "Rajnagar"
+    "Rajnagar",
 ]
-
 
 ROLES = {
     "Batter",
     "Bowler",
-    "All-Rounder"
+    "All-Rounder",
 }
-
 
 BATTING = {
     "Right-hand Batsman",
-    "Left-hand Batsman"
+    "Left-hand Batsman",
 }
-
 
 BOWLING = {
     "Right-hand Bowling",
-    "Left-hand Bowling"
+    "Left-hand Bowling",
 }
 
 
-# =========================================================
-# DATABASE HELPER
-# =========================================================
+# ============================================================
+# DATABASE
+# ============================================================
 
 class DBConnection:
 
     def __init__(self):
-
         self.c = psycopg.connect(
             DATABASE_URL,
-            row_factory=dict_row
+            row_factory=dict_row,
         )
 
     def execute(self, query, params=None):
-
-        query = query.replace(
-            "?",
-            "%s"
-        )
-
+        query = query.replace("?", "%s")
         return self.c.execute(
             query,
-            params or ()
+            params or (),
         )
 
     def commit(self):
@@ -142,28 +121,75 @@ def db():
     return DBConnection()
 
 
-# =========================================================
-# ADMIN AUTHENTICATION
-# =========================================================
+# ============================================================
+# EXTRA DATABASE TABLE
+# Team Registration Interest
+# ============================================================
+
+def create_extra_tables():
+
+    c = None
+
+    try:
+        c = db()
+
+        c.execute(
+            """
+            CREATE TABLE IF NOT EXISTS team_interests (
+                id SERIAL PRIMARY KEY,
+                interest_no TEXT UNIQUE NOT NULL,
+                team_name TEXT NOT NULL,
+                contact_name TEXT NOT NULL,
+                phone TEXT NOT NULL,
+                email TEXT NOT NULL,
+                village TEXT NOT NULL,
+                gram_panchayat TEXT NOT NULL,
+                registration_fee INTEGER DEFAULT 5000,
+                interest_charge INTEGER DEFAULT 100,
+                payment_status TEXT DEFAULT 'Pending',
+                status TEXT DEFAULT 'Interested',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+
+        c.commit()
+
+    except Exception as e:
+        print(
+            "EXTRA TABLE ERROR:",
+            repr(e),
+        )
+
+        if c:
+            c.rollback()
+
+    finally:
+        if c:
+            c.close()
+
+
+create_extra_tables()
+
+
+# ============================================================
+# ADMIN
+# ============================================================
 
 def admin_required(fn):
 
     @wraps(fn)
-    def wrapped(*a, **kw):
+    def wrapped(*args, **kwargs):
 
         if not session.get("admin"):
             return redirect("/admin/login")
 
-        return fn(*a, **kw)
+        return fn(*args, **kwargs)
 
     return wrapped
 
 
-# =========================================================
-# REGISTRATION NUMBERS
-# =========================================================
-
-def next_reg(c):
+def next_player_registration(c):
 
     row = c.execute(
         """
@@ -180,83 +206,83 @@ def next_team_interest(c):
     row = c.execute(
         """
         SELECT COALESCE(MAX(id), 0) + 1 AS next_id
-        FROM team_interest
+        FROM team_interests
         """
     ).fetchone()
 
     return f"UPL-TI-{row['next_id']:04d}"
 
 
-# =========================================================
-# GLOBAL TEMPLATE DATA
-# =========================================================
-
 @app.context_processor
-def globals_():
+def global_variables():
 
     return {
         "panchayats": PANCHAYATS
     }
 
 
-# =========================================================
+# ============================================================
 # HOME
-# =========================================================
+# ============================================================
 
 @app.get("/")
 def home():
 
     c = db()
 
-    fixtures = c.execute(
-        """
-        SELECT *
-        FROM fixtures
-        ORDER BY match_date, match_time
-        LIMIT 3
-        """
-    ).fetchall()
+    try:
 
-    news = c.execute(
-        """
-        SELECT *
-        FROM news
-        WHERE published = 1
-        ORDER BY id DESC
-        LIMIT 3
-        """
-    ).fetchall()
+        fixtures = c.execute(
+            """
+            SELECT *
+            FROM fixtures
+            ORDER BY match_date, match_time
+            LIMIT 3
+            """
+        ).fetchall()
 
-    points = c.execute(
-        """
-        SELECT *
-        FROM points_table
-        ORDER BY points DESC, nrr DESC
-        """
-    ).fetchall()
+        news = c.execute(
+            """
+            SELECT *
+            FROM news
+            WHERE published = 1
+            ORDER BY id DESC
+            LIMIT 3
+            """
+        ).fetchall()
 
-    teams = c.execute(
-        """
-        SELECT *
-        FROM teams
-        ORDER BY name
-        """
-    ).fetchall()
+        points = c.execute(
+            """
+            SELECT *
+            FROM points_table
+            ORDER BY points DESC, nrr DESC, team_name
+            """
+        ).fetchall()
 
-    c.close()
+        teams = c.execute(
+            """
+            SELECT *
+            FROM teams
+            ORDER BY name
+            """
+        ).fetchall()
+
+    finally:
+
+        c.close()
 
     return render_template(
         "home.html",
         fixtures=fixtures,
         news=news,
         points=points,
-        teams=teams
+        teams=teams,
     )
 
 
-# =========================================================
+# ============================================================
 # PLAYER REGISTRATION PAGE
-# =========================================================
+# ============================================================
 
 @app.get("/registration")
 def registration():
@@ -266,9 +292,9 @@ def registration():
     )
 
 
-# =========================================================
+# ============================================================
 # PLAYER REGISTRATION API
-# =========================================================
+# ============================================================
 
 @app.post("/api/register")
 def register():
@@ -277,59 +303,56 @@ def register():
 
     name = f.get(
         "name",
-        ""
+        "",
     ).strip()
 
     age_raw = f.get(
         "age",
-        ""
+        "",
     ).strip()
 
     phone = re.sub(
         r"\D",
         "",
-        f.get(
-            "phone",
-            ""
-        )
+        f.get("phone", ""),
     )
 
     email = f.get(
         "email",
-        ""
+        "",
     ).strip().lower()
 
     village = f.get(
         "village",
-        ""
+        "",
     ).strip()
 
-    p = f.get(
+    panchayat = f.get(
         "panchayat",
-        ""
+        "",
     ).strip()
 
     role = f.get(
         "role",
-        ""
+        "",
     ).strip()
 
-    bat = f.get(
-        "battingHand",
-        ""
-    ).strip() or None
-
-    bowl = f.get(
-        "bowlingHand",
-        ""
-    ).strip() or None
-
-    photo = request.files.get(
-        "photo"
+    batting = (
+        f.get("battingHand", "").strip()
+        or None
     )
 
+    bowling = (
+        f.get("bowlingHand", "").strip()
+        or None
+    )
 
-    # Required fields
+    photo = request.files.get("photo")
+
+
+    # --------------------------------------------------------
+    # REQUIRED FIELDS
+    # --------------------------------------------------------
 
     if not all([
         name,
@@ -337,56 +360,62 @@ def register():
         phone,
         email,
         village,
-        p,
+        panchayat,
         role,
-        photo
+        photo,
     ]):
 
         return jsonify(
             ok=False,
-            error="Please complete all required fields."
+            error="Please complete all required fields.",
         ), 400
 
 
-    # Age
+    # --------------------------------------------------------
+    # AGE
+    # --------------------------------------------------------
 
     try:
 
         age = int(age_raw)
 
-    except Exception:
+    except ValueError:
 
         return jsonify(
             ok=False,
-            error="Age must be a number."
+            error="Age must be a number.",
         ), 400
 
 
-    if not 10 <= age <= 80:
+    if age < 10 or age > 80:
 
         return jsonify(
             ok=False,
-            error="Please enter a valid age."
+            error="Please enter a valid age.",
         ), 400
 
 
-    # Phone
+    # --------------------------------------------------------
+    # PHONE
+    # --------------------------------------------------------
 
     if len(phone) != 10:
 
         return jsonify(
             ok=False,
-            error="Phone/WhatsApp number must be 10 digits."
+            error="Phone/WhatsApp number must be 10 digits.",
         ), 400
 
 
-    # Selection validation
+    # --------------------------------------------------------
+    # VALIDATION
+    # --------------------------------------------------------
 
-    if p not in PANCHAYATS:
+    if panchayat not in PANCHAYATS:
 
         return jsonify(
             ok=False,
-            error="Invalid Gram Panchayat."
+            error="Invalid panchayat selection.",
         ), 400
 
 
@@ -394,54 +423,50 @@ def register():
 
         return jsonify(
             ok=False,
-            error="Invalid player role."
+            error="Invalid role selection.",
         ), 400
 
 
-    # Batter
-
     if role == "Batter":
 
-        if bat not in BATTING:
+        if batting not in BATTING:
 
             return jsonify(
                 ok=False,
-                error="Select batting style."
+                error="Select batting style.",
             ), 400
 
-        bowl = None
+        bowling = None
 
-
-    # Bowler
 
     elif role == "Bowler":
 
-        if bowl not in BOWLING:
+        if bowling not in BOWLING:
 
             return jsonify(
                 ok=False,
-                error="Select bowling style."
+                error="Select bowling style.",
             ), 400
 
-        bat = None
+        batting = None
 
-
-    # All Rounder
 
     else:
 
         if (
-            bat not in BATTING
-            or bowl not in BOWLING
+            batting not in BATTING
+            or bowling not in BOWLING
         ):
 
             return jsonify(
                 ok=False,
-                error="Select both batting and bowling styles."
+                error="Select both batting and bowling styles.",
             ), 400
 
 
-    # Photo extension
+    # --------------------------------------------------------
+    # PHOTO
+    # --------------------------------------------------------
 
     ext = Path(
         photo.filename or ""
@@ -452,12 +477,12 @@ def register():
         ".jpg",
         ".jpeg",
         ".png",
-        ".webp"
+        ".webp",
     }:
 
         return jsonify(
             ok=False,
-            error="Photo must be JPG, PNG or WebP."
+            error="Photo must be JPG, PNG or WebP.",
         ), 400
 
 
@@ -465,23 +490,36 @@ def register():
 
     try:
 
-        reg = next_reg(c)
+        registration_no = next_player_registration(c)
 
 
-        safe = re.sub(
+        safe_name = re.sub(
             r"[^A-Za-z0-9_-]",
             "_",
-            name
+            name,
         )[:40]
 
 
-        # Cloudinary upload
+        if not os.environ.get(
+            "CLOUDINARY_CLOUD_NAME"
+        ):
+
+            raise RuntimeError(
+                "Cloudinary is not configured."
+            )
+
+
+        # ----------------------------------------------------
+        # UPLOAD PHOTO TO CLOUDINARY
+        # ----------------------------------------------------
 
         upload_result = cloudinary.uploader.upload(
             photo,
             folder="upl/players",
-            public_id=f"{reg}_{safe}",
-            resource_type="image"
+            public_id=(
+                f"{registration_no}_{safe_name}"
+            ),
+            resource_type="image",
         )
 
 
@@ -490,12 +528,13 @@ def register():
         ]
 
 
-        # Database
+        # ----------------------------------------------------
+        # SAVE PLAYER
+        # ----------------------------------------------------
 
         c.execute(
             """
-            INSERT INTO players
-            (
+            INSERT INTO players (
                 registration_no,
                 full_name,
                 age,
@@ -509,24 +548,34 @@ def register():
                 photo_path,
                 status
             )
-
-            VALUES
-            (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'Pending')
+            VALUES (
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                'Pending'
+            )
             """,
-
             (
-                reg,
+                registration_no,
                 name,
                 age,
                 phone,
                 email,
                 village,
-                p,
+                panchayat,
                 role,
-                bat,
-                bowl,
-                photo_url
-            )
+                batting,
+                bowling,
+                photo_url,
+            ),
         )
 
 
@@ -535,7 +584,7 @@ def register():
 
         return jsonify(
             ok=True,
-            registration_no=reg
+            registration_no=registration_no,
         )
 
 
@@ -545,17 +594,25 @@ def register():
 
         return jsonify(
             ok=False,
-            error="This phone number or e-mail is already registered."
+            error=(
+                "This phone number or e-mail "
+                "is already registered."
+            ),
         ), 409
 
 
-    except Exception:
+    except Exception as e:
 
         c.rollback()
 
+        print(
+            "PLAYER REGISTRATION ERROR:",
+            repr(e),
+        )
+
         return jsonify(
             ok=False,
-            error="Registration failed. Please try again."
+            error="Registration failed. Please try again.",
         ), 500
 
 
@@ -564,102 +621,88 @@ def register():
         c.close()
 
 
-# =========================================================
-# TEAM INTEREST REGISTRATION PAGE
-# =========================================================
+# ============================================================
+# TEAM REGISTRATION / INTEREST PAGE
+# ============================================================
 
 @app.get("/team-registration")
 def team_registration():
 
     return render_template(
-        "team-registration.html"
+        "team_registration.html"
     )
 
 
-# =========================================================
-# TEAM INTEREST REGISTRATION API
-# =========================================================
+# ============================================================
+# TEAM INTEREST API
+# ============================================================
 
 @app.post("/api/team-interest")
-def team_interest_submit():
+def team_interest():
 
     f = request.form
 
 
     team_name = f.get(
         "team_name",
-        ""
+        "",
     ).strip()
 
-
-    representative_name = f.get(
-        "representative_name",
-        ""
+    contact_name = f.get(
+        "contact_name",
+        "",
     ).strip()
-
 
     phone = re.sub(
         r"\D",
         "",
-        f.get(
-            "phone",
-            ""
-        )
+        f.get("phone", ""),
     )
-
 
     email = f.get(
         "email",
-        ""
+        "",
     ).strip().lower()
-
 
     village = f.get(
         "village",
-        ""
+        "",
     ).strip()
-
 
     panchayat = f.get(
         "panchayat",
-        ""
+        "",
     ).strip()
 
 
-    # Required fields
-
     if not all([
         team_name,
-        representative_name,
+        contact_name,
         phone,
         email,
         village,
-        panchayat
+        panchayat,
     ]):
 
         return jsonify(
             ok=False,
-            error="Please complete all required fields."
+            error="Please complete all required fields.",
         ), 400
 
-
-    # Phone validation
 
     if len(phone) != 10:
 
         return jsonify(
             ok=False,
-            error="Phone/WhatsApp number must be 10 digits."
+            error="Phone number must be 10 digits.",
         ), 400
 
-
-    # Panchayat validation
 
     if panchayat not in PANCHAYATS:
 
         return jsonify(
             ok=False,
-            error="Invalid Gram Panchayat."
+            error="Invalid panchayat selection.",
         ), 400
 
 
@@ -670,41 +713,44 @@ def team_interest_submit():
         interest_no = next_team_interest(c)
 
 
-        # Current amount is only an interest/processing charge.
-        # Official team registration fee is ₹5,000.
-
         c.execute(
             """
-            INSERT INTO team_interest
-            (
+            INSERT INTO team_interests (
                 interest_no,
                 team_name,
-                representative_name,
+                contact_name,
                 phone,
                 email,
                 village,
                 gram_panchayat,
-                interest_amount,
+                registration_fee,
+                interest_charge,
                 payment_status,
                 status
             )
-
-            VALUES
-            (?,?,?,?,?,?,?,?,?,?)
+            VALUES (
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                5000,
+                100,
+                'Pending',
+                'Interested'
+            )
             """,
-
             (
                 interest_no,
                 team_name,
-                representative_name,
+                contact_name,
                 phone,
                 email,
                 village,
                 panchayat,
-                100,
-                "Pending",
-                "Pending"
-            )
+            ),
         )
 
 
@@ -715,30 +761,25 @@ def team_interest_submit():
             ok=True,
             interest_no=interest_no,
             message=(
-                "Thank you for showing interest in UPL. "
-                "Our organising committee will contact you "
-                "shortly if a team slot is available."
-            )
+                "Thank you for showing interest. "
+                "Our UPL Organising Committee will "
+                "contact you soon if a team slot is available."
+            ),
         )
 
 
-    except psycopg.IntegrityError:
+    except Exception as e:
 
         c.rollback()
 
-        return jsonify(
-            ok=False,
-            error="This application could not be submitted."
-        ), 409
-
-
-    except Exception:
-
-        c.rollback()
+        print(
+            "TEAM INTEREST ERROR:",
+            repr(e),
+        )
 
         return jsonify(
             ok=False,
-            error="Something went wrong. Please try again."
+            error="Unable to submit your interest right now.",
         ), 500
 
 
@@ -747,180 +788,194 @@ def team_interest_submit():
         c.close()
 
 
-# =========================================================
+# ============================================================
 # PUBLIC TEAMS
-# =========================================================
+# ============================================================
 
 @app.get("/teams")
 def teams():
 
     c = db()
 
-    teams = c.execute(
-        """
-        SELECT *
-        FROM teams
-        ORDER BY name
-        """
-    ).fetchall()
+    try:
 
-    c.close()
+        rows = c.execute(
+            """
+            SELECT *
+            FROM teams
+            ORDER BY name
+            """
+        ).fetchall()
+
+    finally:
+
+        c.close()
 
 
     return render_template(
         "teams.html",
-        teams=teams
+        teams=rows,
     )
 
 
-# =========================================================
+# ============================================================
 # PUBLIC PLAYERS
-# =========================================================
+# ============================================================
 
 @app.get("/players")
 def players():
 
     c = db()
 
-    rows = c.execute(
-        """
-        SELECT *
-        FROM players
-        WHERE status='Approved'
-        ORDER BY full_name
-        """
-    ).fetchall()
+    try:
 
-    c.close()
+        rows = c.execute(
+            """
+            SELECT *
+            FROM players
+            WHERE status = 'Approved'
+            ORDER BY full_name
+            """
+        ).fetchall()
+
+    finally:
+
+        c.close()
 
 
     return render_template(
         "players.html",
-        players=rows
+        players=rows,
     )
 
 
-# =========================================================
+# ============================================================
 # PUBLIC FIXTURES
-# =========================================================
+# ============================================================
 
 @app.get("/fixtures")
 def fixtures():
 
     c = db()
 
-    rows = c.execute(
-        """
-        SELECT *
-        FROM fixtures
-        ORDER BY match_date, match_time, match_no
-        """
-    ).fetchall()
+    try:
 
-    c.close()
+        rows = c.execute(
+            """
+            SELECT *
+            FROM fixtures
+            ORDER BY match_date, match_time, match_no
+            """
+        ).fetchall()
+
+    finally:
+
+        c.close()
 
 
     return render_template(
         "fixtures.html",
-        fixtures=rows
+        fixtures=rows,
     )
 
 
-# =========================================================
+# ============================================================
 # PUBLIC POINTS TABLE
-# =========================================================
+# ============================================================
 
 @app.get("/points-table")
 def pointstable():
 
     c = db()
 
-    rows = c.execute(
-        """
-        SELECT *
-        FROM points_table
-        ORDER BY points DESC, nrr DESC, team_name
-        """
-    ).fetchall()
+    try:
 
-    c.close()
+        rows = c.execute(
+            """
+            SELECT *
+            FROM points_table
+            ORDER BY
+                points DESC,
+                nrr DESC,
+                team_name
+            """
+        ).fetchall()
+
+    finally:
+
+        c.close()
 
 
     return render_template(
         "points.html",
-        points=rows
+        points=rows,
     )
 
 
-# =========================================================
+# ============================================================
 # PUBLIC NEWS
-# =========================================================
+# ============================================================
 
 @app.get("/news")
 def news():
 
     c = db()
 
-    rows = c.execute(
-        """
-        SELECT *
-        FROM news
-        WHERE published=1
-        ORDER BY id DESC
-        """
-    ).fetchall()
+    try:
 
-    c.close()
+        rows = c.execute(
+            """
+            SELECT *
+            FROM news
+            WHERE published = 1
+            ORDER BY id DESC
+            """
+        ).fetchall()
+
+    finally:
+
+        c.close()
 
 
     return render_template(
         "news.html",
-        news=rows
+        news=rows,
     )
 
 
-# =========================================================
+# ============================================================
 # PUBLIC GALLERY
-# =========================================================
+# ============================================================
 
 @app.get("/gallery")
 def gallery():
 
     c = db()
 
-    rows = c.execute(
-        """
-        SELECT *
-        FROM gallery
-        ORDER BY id DESC
-        """
-    ).fetchall()
+    try:
 
-    c.close()
+        rows = c.execute(
+            """
+            SELECT *
+            FROM gallery
+            ORDER BY id DESC
+            """
+        ).fetchall()
+
+    finally:
+
+        c.close()
 
 
     return render_template(
         "gallery.html",
-        gallery=rows
+        gallery=rows,
     )
 
 
-# =========================================================
-# LEGACY LOCAL UPLOADS
-# =========================================================
-
-@app.get("/uploads/<path:filename>")
-def uploaded(filename):
-
-    return send_from_directory(
-        UPLOADS,
-        filename
-    )
-
-
-# =========================================================
+# ============================================================
 # ADMIN LOGIN
-# =========================================================
+# ============================================================
 
 @app.get("/admin/login")
 def admin_login():
@@ -933,46 +988,48 @@ def admin_login():
 @app.post("/admin/login")
 def admin_login_post():
 
-    u = request.form.get(
+    username = request.form.get(
         "username",
-        ""
-    )
+        "",
+    ).strip()
 
-    pw = request.form.get(
+    password = request.form.get(
         "password",
-        ""
+        "",
     )
 
 
     c = db()
 
-    row = c.execute(
-        """
-        SELECT *
-        FROM admins
-        WHERE username=?
-        """,
-        (u,)
-    ).fetchone()
+    try:
 
-    c.close()
+        row = c.execute(
+            """
+            SELECT *
+            FROM admins
+            WHERE username = ?
+            """,
+            (username,),
+        ).fetchone()
+
+    finally:
+
+        c.close()
 
 
     if row and check_password_hash(
         row["password_hash"],
-        pw
+        password,
     ):
 
         session["admin"] = True
 
-        return redirect(
-            "/admin"
-        )
+        return redirect("/admin")
 
 
     return render_template(
         "login.html",
-        error="Invalid username or password."
+        error="Invalid username or password.",
     ), 401
 
 
@@ -986,9 +1043,9 @@ def logout():
     )
 
 
-# =========================================================
+# ============================================================
 # ADMIN DASHBOARD
-# =========================================================
+# ============================================================
 
 @app.get("/admin")
 @admin_required
@@ -996,209 +1053,36 @@ def admin():
 
     c = db()
 
+    try:
 
-    players = c.execute(
-        """
-        SELECT *
-        FROM players
-        ORDER BY id DESC
-        """
-    ).fetchall()
-
-
-    teams = c.execute(
-        """
-        SELECT *
-        FROM teams
-        ORDER BY name
-        """
-    ).fetchall()
-
-
-    fixtures = c.execute(
-        """
-        SELECT *
-        FROM fixtures
-        ORDER BY match_date, match_time
-        """
-    ).fetchall()
-
-
-    news = c.execute(
-        """
-        SELECT *
-        FROM news
-        ORDER BY id DESC
-        """
-    ).fetchall()
-
-
-    points = c.execute(
-        """
-        SELECT *
-        FROM points_table
-        ORDER BY points DESC, nrr DESC
-        """
-    ).fetchall()
-
-
-    gallery = c.execute(
-        """
-        SELECT *
-        FROM gallery
-        ORDER BY id DESC
-        """
-    ).fetchall()
-
-
-    # Team Interest Applications
-
-    team_interests = c.execute(
-        """
-        SELECT *
-        FROM team_interest
-        ORDER BY id DESC
-        """
-    ).fetchall()
-
-
-    c.close()
-
-
-    return render_template(
-        "admin.html",
-
-        players=players,
-
-        teams=teams,
-
-        fixtures=fixtures,
-
-        news=news,
-
-        points=points,
-
-        gallery=gallery,
-
-        team_interests=team_interests
-    )
-
-
-# =========================================================
-# PLAYER APPROVAL
-# =========================================================
-
-@app.post("/admin/player/<int:id>/<action>")
-@admin_required
-def player_action(id, action):
-
-    if action not in {
-        "Approved",
-        "Rejected",
-        "Pending"
-    }:
-
-        return redirect(
-            "/admin"
-        )
-
-
-    c = db()
-
-
-    c.execute(
-        """
-        UPDATE players
-        SET status=?
-        WHERE id=?
-        """,
-        (
-            action,
-            id
-        )
-    )
-
-
-    c.commit()
-    c.close()
-
-
-    return redirect(
-        "/admin"
-    )
-
-
-# =========================================================
-# TEAM INTEREST MANAGEMENT
-# =========================================================
-
-@app.post("/admin/team-interest/<int:id>/<action>")
-@admin_required
-def team_interest_action(id, action):
-
-    if action not in {
-        "Approved",
-        "Rejected",
-        "Contacted",
-        "Pending"
-    }:
-
-        return redirect(
-            "/admin"
-        )
-
-
-    c = db()
-
-
-    c.execute(
-        """
-        UPDATE team_interest
-        SET status=?
-        WHERE id=?
-        """,
-        (
-            action,
-            id
-        )
-    )
-
-
-    c.commit()
-    c.close()
-
-
-    return redirect(
-        "/admin"
-    )
-
-
-# =========================================================
-# ADD TEAM
-# =========================================================
-
-@app.post("/admin/team/add")
-@admin_required
-def team_add():
-
-    name = request.form.get(
-        "name",
-        ""
-    ).strip()
-
-
-    description = request.form.get(
-        "description",
-        ""
-    ).strip()
-
-
-    if name:
-
-        c = db()
-
-
-        c.execute(
+        players = c.execute(
             """
-            INSERT INTO teams(
-                nam
+            SELECT *
+            FROM players
+            ORDER BY id DESC
+            """
+        ).fetchall()
+
+
+        teams = c.execute(
+            """
+            SELECT *
+            FROM teams
+            ORDER BY name
+            """
+        ).fetchall()
+
+
+        fixtures = c.execute(
+            """
+            SELECT *
+            FROM fixtures
+            ORDER BY match_date, match_time
+            """
+        ).fetchall()
+
+
+        news_rows = c.execute(
+            """
+            SELECT *
+         
