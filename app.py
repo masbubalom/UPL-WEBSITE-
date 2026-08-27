@@ -1085,4 +1085,673 @@ def admin():
         news_rows = c.execute(
             """
             SELECT *
-         
+            FROM news
+            ORDER BY id DESC
+            """
+        ).fetchall()
+
+
+        points = c.execute(
+            """
+            SELECT *
+            FROM points_table
+            ORDER BY points DESC, nrr DESC
+            """
+        ).fetchall()
+
+
+        gallery_rows = c.execute(
+            """
+            SELECT *
+            FROM gallery
+            ORDER BY id DESC
+            """
+        ).fetchall()
+
+
+        team_interests = c.execute(
+            """
+            SELECT *
+            FROM team_interests
+            ORDER BY id DESC
+            """
+        ).fetchall()
+
+
+    finally:
+
+        c.close()
+
+
+    return render_template(
+        "admin.html",
+        players=players,
+        teams=teams,
+        fixtures=fixtures,
+        news=news_rows,
+        points=points,
+        gallery=gallery_rows,
+        team_interests=team_interests,
+    )
+
+
+# ============================================================
+# PLAYER APPROVAL
+# ============================================================
+
+@app.post(
+    "/admin/player/<int:id>/<action>"
+)
+@admin_required
+def player_action(id, action):
+
+    allowed = {
+        "Approved",
+        "Rejected",
+        "Pending",
+    }
+
+
+    if action not in allowed:
+
+        return redirect("/admin")
+
+
+    c = db()
+
+    try:
+
+        c.execute(
+            """
+            UPDATE players
+            SET status = ?
+            WHERE id = ?
+            """,
+            (
+                action,
+                id,
+            ),
+        )
+
+        c.commit()
+
+    finally:
+
+        c.close()
+
+
+    return redirect("/admin")
+
+
+# ============================================================
+# TEAM MANAGEMENT
+# ============================================================
+
+@app.post("/admin/team/add")
+@admin_required
+def team_add():
+
+    name = request.form.get(
+        "name",
+        "",
+    ).strip()
+
+    description = request.form.get(
+        "description",
+        "",
+    ).strip()
+
+
+    if name:
+
+        c = db()
+
+        try:
+
+            c.execute(
+                """
+                INSERT INTO teams(
+                    name,
+                    description
+                )
+                VALUES(
+                    ?,
+                    ?
+                )
+                ON CONFLICT(name)
+                DO NOTHING
+                """,
+                (
+                    name,
+                    description,
+                ),
+            )
+
+            c.commit()
+
+        finally:
+
+            c.close()
+
+
+    return redirect("/admin")
+
+
+@app.post(
+    "/admin/team/delete/<int:id>"
+)
+@admin_required
+def team_delete(id):
+
+    c = db()
+
+    try:
+
+        c.execute(
+            """
+            DELETE FROM teams
+            WHERE id = ?
+            """,
+            (id,),
+        )
+
+        c.commit()
+
+    finally:
+
+        c.close()
+
+
+    return redirect("/admin")
+
+
+# ============================================================
+# TEAM INTEREST STATUS
+# ============================================================
+
+@app.post(
+    "/admin/team-interest/<int:id>/<status>"
+)
+@admin_required
+def team_interest_status(
+    id,
+    status,
+):
+
+    allowed = {
+        "Interested",
+        "Contacted",
+        "Approved",
+        "Rejected",
+    }
+
+
+    if status not in allowed:
+
+        return redirect("/admin")
+
+
+    c = db()
+
+    try:
+
+        c.execute(
+            """
+            UPDATE team_interests
+            SET status = ?
+            WHERE id = ?
+            """,
+            (
+                status,
+                id,
+            ),
+        )
+
+        c.commit()
+
+    finally:
+
+        c.close()
+
+
+    return redirect("/admin")
+
+
+# ============================================================
+# FIXTURES
+# ============================================================
+
+@app.post("/admin/fixture/add")
+@admin_required
+def fixture_add():
+
+    f = request.form
+
+    c = db()
+
+    try:
+
+        c.execute(
+            """
+            INSERT INTO fixtures(
+                match_no,
+                team1,
+                team2,
+                match_date,
+                match_time,
+                venue,
+                status,
+                result_text
+            )
+            VALUES(
+                ?,
+                ?,
+                ?,
+                ?,
+                ?,
+                ?,
+                ?,
+                ?
+            )
+            """,
+            (
+                f.get("match_no") or None,
+                f.get("team1", "").strip(),
+                f.get("team2", "").strip(),
+                f.get("date") or None,
+                f.get("time") or None,
+                f.get("venue")
+                or "Uttar Lakshmipur High School",
+                f.get("status")
+                or "Upcoming",
+                f.get("result")
+                or "",
+            ),
+        )
+
+        c.commit()
+
+    finally:
+
+        c.close()
+
+
+    return redirect("/admin")
+
+
+@app.post(
+    "/admin/fixture/delete/<int:id>"
+)
+@admin_required
+def fixture_delete(id):
+
+    c = db()
+
+    try:
+
+        c.execute(
+            """
+            DELETE FROM fixtures
+            WHERE id = ?
+            """,
+            (id,),
+        )
+
+        c.commit()
+
+    finally:
+
+        c.close()
+
+
+    return redirect("/admin")
+
+
+# ============================================================
+# NEWS
+# ============================================================
+
+@app.post("/admin/news/add")
+@admin_required
+def news_add():
+
+    title = request.form.get(
+        "title",
+        "",
+    ).strip()
+
+    body = request.form.get(
+        "body",
+        "",
+    ).strip()
+
+
+    if title and body:
+
+        c = db()
+
+        try:
+
+            c.execute(
+                """
+                INSERT INTO news(
+                    title,
+                    body,
+                    published
+                )
+                VALUES(
+                    ?,
+                    ?,
+                    1
+                )
+                """,
+                (
+                    title,
+                    body,
+                ),
+            )
+
+            c.commit()
+
+        finally:
+
+            c.close()
+
+
+    return redirect("/admin")
+
+
+@app.post(
+    "/admin/news/delete/<int:id>"
+)
+@admin_required
+def news_delete(id):
+
+    c = db()
+
+    try:
+
+        c.execute(
+            """
+            DELETE FROM news
+            WHERE id = ?
+            """,
+            (id,),
+        )
+
+        c.commit()
+
+    finally:
+
+        c.close()
+
+
+    return redirect("/admin")
+
+
+# ============================================================
+# POINTS TABLE
+# ============================================================
+
+@app.post("/admin/points/add")
+@admin_required
+def points_add():
+
+    f = request.form
+
+    team = f.get(
+        "team_name",
+        "",
+    ).strip()
+
+
+    if team:
+
+        c = db()
+
+        try:
+
+            c.execute(
+                """
+                INSERT INTO points_table(
+                    team_name,
+                    played,
+                    won,
+                    lost,
+                    tied,
+                    points,
+                    nrr
+                )
+                VALUES(
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    ?
+                )
+                ON CONFLICT(team_name)
+                DO UPDATE SET
+                    played = EXCLUDED.played,
+                    won = EXCLUDED.won,
+                    lost = EXCLUDED.lost,
+                    tied = EXCLUDED.tied,
+                    points = EXCLUDED.points,
+                    nrr = EXCLUDED.nrr
+                """,
+                (
+                    team,
+                    int(f.get("played") or 0),
+                    int(f.get("won") or 0),
+                    int(f.get("lost") or 0),
+                    int(f.get("tied") or 0),
+                    int(f.get("points") or 0),
+                    float(f.get("nrr") or 0),
+                ),
+            )
+
+            c.commit()
+
+        finally:
+
+            c.close()
+
+
+    return redirect("/admin")
+
+
+@app.post(
+    "/admin/points/delete/<int:id>"
+)
+@admin_required
+def points_delete(id):
+
+    c = db()
+
+    try:
+
+        c.execute(
+            """
+            DELETE FROM points_table
+            WHERE id = ?
+            """,
+            (id,),
+        )
+
+        c.commit()
+
+    finally:
+
+        c.close()
+
+
+    return redirect("/admin")
+
+
+# ============================================================
+# GALLERY
+# ============================================================
+
+@app.post("/admin/gallery/add")
+@admin_required
+def gallery_add():
+
+    image = request.files.get(
+        "image"
+    )
+
+    title = request.form.get(
+        "title",
+        "",
+    ).strip()
+
+
+    if not image or not image.filename:
+
+        return redirect("/admin")
+
+
+    ext = Path(
+        image.filename
+    ).suffix.lower()
+
+
+    if ext not in {
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".webp",
+    }:
+
+        return redirect("/admin")
+
+
+    c = None
+
+    try:
+
+        if not os.environ.get(
+            "CLOUDINARY_CLOUD_NAME"
+        ):
+
+            raise RuntimeError(
+                "Cloudinary is not configured."
+            )
+
+
+        upload_result = cloudinary.uploader.upload(
+            image,
+            folder="upl/gallery",
+            resource_type="image",
+        )
+
+
+        image_url = upload_result[
+            "secure_url"
+        ]
+
+
+        c = db()
+
+
+        c.execute(
+            """
+            INSERT INTO gallery(
+                title,
+                image_path
+            )
+            VALUES(
+                ?,
+                ?
+            )
+            """,
+            (
+                title,
+                image_url,
+            ),
+        )
+
+
+        c.commit()
+
+
+    except Exception as e:
+
+        print(
+            "GALLERY ERROR:",
+            repr(e),
+        )
+
+        if c:
+
+            c.rollback()
+
+
+    finally:
+
+        if c:
+
+            c.close()
+
+
+    return redirect("/admin")
+
+
+@app.post(
+    "/admin/gallery/delete/<int:id>"
+)
+@admin_required
+def gallery_delete(id):
+
+    c = db()
+
+    try:
+
+        c.execute(
+            """
+            DELETE FROM gallery
+            WHERE id = ?
+            """,
+            (id,),
+        )
+
+        c.commit()
+
+    finally:
+
+        c.close()
+
+
+    return redirect("/admin")
+
+
+# ============================================================
+# HEALTH CHECK
+# ============================================================
+
+@app.get("/health")
+def health():
+
+    return jsonify(
+        status="ok",
+        service="UPL Website",
+    )
+
+
+# ============================================================
+# START
+# ============================================================
+
+if __name__ == "__main__":
+
+    app.run(
+        host="0.0.0.0",
+        port=int(
+            os.environ.get(
+                "PORT",
+                5000,
+            )
+        ),
+        debug=False,
+    )
