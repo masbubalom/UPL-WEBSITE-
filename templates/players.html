@@ -3,14 +3,18 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+
 <title>UPL Players</title>
+
 <link rel="stylesheet" href="/static/style.css">
 </head>
 
 <body>
 
 <div class="nav">
+
     <a href="/">UPL</a>
+
     <div>
         <a href="/">HOME</a>
         <a href="/teams">TEAMS</a>
@@ -19,22 +23,35 @@
         <a href="/news">NEWS</a>
         <a href="/gallery">GALLERY</a>
     </div>
+
 </div>
+
 
 <main class="wrap">
 
+
 <div class="banner">
+
     <h1>UPL PLAYERS</h1>
-    <p class="muted">Official registered and approved players</p>
+
+    <p class="muted">
+        Official registered and approved players
+    </p>
+
 </div>
+
 
 <section class="admin-section">
 
+
 <div class="card" style="overflow:auto">
+
 
 <table class="table">
 
+
 <tr>
+
     <th>Photo</th>
     <th>Registration</th>
     <th>Name</th>
@@ -44,89 +61,88 @@
     <th>Role</th>
     <th>Batting</th>
     <th>Bowling</th>
+
 </tr>
+
 
 {% for p in players %}
 
+
 <tr>
+
+
+<!-- PLAYER PHOTO -->
 
 <td>
 
 {% if p['photo_path'] %}
 
-<img
-{% if p['photo_path'].startswith('http') %}
-src="{{p['photo_path']}}"
+    {% if p['photo_path'].startswith('http') %}
+
+        <!-- Cloudinary photo -->
+        <img
+            src="{{ p['photo_path'] }}"
+            alt="{{ p['full_name'] }}"
+            loading="lazy"
+            style="
+                width:55px;
+                height:55px;
+                object-fit:cover;
+                border-radius:8px;
+                display:block;
+            "
+        >
+
+    {% else %}
+
+        <!-- Old/local photo -->
+        <img
+            src="/uploads/{{ p['photo_path'] }}"
+            alt="{{ p['full_name'] }}"
+            loading="lazy"
+            style="
+                width:55px;
+                height:55px;
+                object-fit:cover;
+                border-radius:8px;
+                display:block;
+            "
+        >
+
+    {% endif %}
+
 {% else %}
-src="/uploads/{{p['photo_path']}}"
-{% endif %}
 
-alt="{{p['full_name']}}"
-
-style="
-width:55px;
-height:55px;
-object-fit:cover;
-border-radius:8px;
-display:block;
-">
-
-{% else %}
-
-<div style="
-width:55px;
-height:55px;
-border-radius:8px;
-background:#222;
-display:flex;
-align-items:center;
-justify-content:center;
-font-size:24px;
-">
-👤
-</div>
+    <!-- No photo -->
+    <div
+        style="
+            width:55px;
+            height:55px;
+            border-radius:8px;
+            background:#222;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            font-size:24px;
+        "
+    >
+        👤
+    </div>
 
 {% endif %}
 
 </td>
 
-<td>{{p['registration_no']}}</td>
+
+<!-- REGISTRATION -->
 
 <td>
-<strong>{{p['full_name']}}</strong>
+    {{ p['registration_no'] }}
 </td>
 
-<td>{{p['age']}}</td>
 
-<td>{{p['village']}}</td>
+<!-- NAME -->
 
-<td>{{p['gram_panchayat']}}</td>
-
-<td>{{p['primary_role']}}</td>
-
-<td>{{p['batting_style'] or '-'}}</td>
-
-<td>{{p['bowling_style'] or '-'}}</td>
-
-</tr>
-
-{% else %}
-
-<tr>
-<td colspan="9" style="text-align:center;padding:30px">
-No approved players yet.
-</td>
-</tr>
-
-{% endfor %}
-
-</table>
-
-</div>
-
-</section>
-
-</main>
-
-</body>
-</html>
+<td>
+    <strong>{{ p['full_name'] }}</strong>
+</
