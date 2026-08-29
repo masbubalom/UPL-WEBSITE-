@@ -1,17 +1,18 @@
 import os
 import re
 import secrets
-from pathlib import Path
-from functools import wraps
-
-import psycopg
-import cloudinary
-import cloudinary.uploader
 import hmac
 import hashlib
 import json
 import smtplib
+
+from pathlib import Path
+from functools import wraps
 from email.message import EmailMessage
+
+import psycopg
+import cloudinary
+import cloudinary.uploader
 from psycopg.rows import dict_row
 
 from flask import (
@@ -36,7 +37,6 @@ except ImportError:
 # ============================================================
 
 BASE = Path(__file__).resolve().parent
-
 DATABASE_URL = os.environ["DATABASE_URL"]
 
 app = Flask(
@@ -99,7 +99,7 @@ BOWLING = {
 
 
 # ============================================================
-# DATABASE
+# DATABASE CONNECTION
 # ============================================================
 
 class DBConnection:
@@ -132,8 +132,7 @@ def db():
 
 
 # ============================================================
-# EXTRA DATABASE TABLE
-# Team Registration Interest
+# TEAM INTEREST TABLE
 # ============================================================
 
 def create_extra_tables():
@@ -141,6 +140,7 @@ def create_extra_tables():
     c = None
 
     try:
+
         c = db()
 
         c.execute(
@@ -169,6 +169,7 @@ def create_extra_tables():
         c.commit()
 
     except Exception as e:
+
         print(
             "EXTRA TABLE ERROR:",
             repr(e),
@@ -178,6 +179,7 @@ def create_extra_tables():
             c.rollback()
 
     finally:
+
         if c:
             c.close()
 
@@ -306,7 +308,7 @@ def registration():
 
 
 # ============================================================
-# PLAYER REGISTRATION API
+# PLAYER REGISTRATION
 # ============================================================
 
 @app.post("/api/register")
@@ -314,15 +316,9 @@ def register():
 
     f = request.form
 
-    name = f.get(
-        "name",
-        "",
-    ).strip()
+    name = f.get("name", "").strip()
 
-    age_raw = f.get(
-        "age",
-        "",
-    ).strip()
+    age_raw = f.get("age", "").strip()
 
     phone = re.sub(
         r"\D",
@@ -362,11 +358,6 @@ def register():
 
     photo = request.files.get("photo")
 
-
-    # --------------------------------------------------------
-    # REQUIRED FIELDS
-    # --------------------------------------------------------
-
     if not all([
         name,
         age_raw,
@@ -383,11 +374,6 @@ def register():
             error="Please complete all required fields.",
         ), 400
 
-
-    # --------------------------------------------------------
-    # AGE
-    # --------------------------------------------------------
-
     try:
 
         age = int(age_raw)
@@ -399,18 +385,12 @@ def register():
             error="Age must be a number.",
         ), 400
 
-
     if age < 10 or age > 80:
 
         return jsonify(
             ok=False,
             error="Please enter a valid age.",
         ), 400
-
-
-    # --------------------------------------------------------
-    # PHONE
-    # --------------------------------------------------------
 
     if len(phone) != 10:
 
@@ -419,11 +399,6 @@ def register():
             error="Phone/WhatsApp number must be 10 digits.",
         ), 400
 
-
-    # --------------------------------------------------------
-    # VALIDATION
-    # --------------------------------------------------------
-
     if panchayat not in PANCHAYATS:
 
         return jsonify(
@@ -431,14 +406,12 @@ def register():
             error="Invalid panchayat selection.",
         ), 400
 
-
     if role not in ROLES:
 
         return jsonify(
             ok=False,
             error="Invalid role selection.",
         ), 400
-
 
     if role == "Batter":
 
@@ -451,7 +424,6 @@ def register():
 
         bowling = None
 
-
     elif role == "Bowler":
 
         if bowling not in BOWLING:
@@ -462,7 +434,6 @@ def register():
             ), 400
 
         batting = None
-
 
     else:
 
@@ -476,15 +447,9 @@ def register():
                 error="Select both batting and bowling styles.",
             ), 400
 
-
-    # --------------------------------------------------------
-    # PHOTO
-    # --------------------------------------------------------
-
     ext = Path(
         photo.filename or ""
     ).suffix.lower()
-
 
     if ext not in {
         ".jpg",
@@ -498,20 +463,17 @@ def register():
             error="Photo must be JPG, PNG or WebP.",
         ), 400
 
-
     c = db()
 
     try:
 
         registration_no = next_player_registration(c)
 
-
         safe_name = re.sub(
             r"[^A-Za-z0-9_-]",
             "_",
             name,
         )[:40]
-
 
         if not os.environ.get(
             "CLOUDINARY_CLOUD_NAME"
@@ -520,11 +482,6 @@ def register():
             raise RuntimeError(
                 "Cloudinary is not configured."
             )
-
-
-        # ----------------------------------------------------
-        # UPLOAD PHOTO TO CLOUDINARY
-        # ----------------------------------------------------
 
         upload_result = cloudinary.uploader.upload(
             photo,
@@ -535,15 +492,9 @@ def register():
             resource_type="image",
         )
 
-
         photo_url = upload_result[
             "secure_url"
         ]
-
-
-        # ----------------------------------------------------
-        # SAVE PLAYER
-        # ----------------------------------------------------
 
         c.execute(
             """
@@ -562,18 +513,7 @@ def register():
                 status
             )
             VALUES (
-                %s,
-                %s,
-                %s,
-                %s,
-                %s,
-                %s,
-                %s,
-                %s,
-                %s,
-                %s,
-                %s,
-                'Pending'
+                %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'Pending'
             )
             """,
             (
@@ -591,15 +531,12 @@ def register():
             ),
         )
 
-
         c.commit()
-
 
         return jsonify(
             ok=True,
             registration_no=registration_no,
         )
-
 
     except psycopg.IntegrityError:
 
@@ -612,7 +549,6 @@ def register():
                 "is already registered."
             ),
         ), 409
-
 
     except Exception as e:
 
@@ -628,58 +564,91 @@ def register():
             error="Registration failed. Please try again.",
         ), 500
 
-
     finally:
 
         c.close()
 
 
 # ============================================================
-# TEAM REGISTRATION / INTEREST PAGE
+# TEAM REGISTRATION PAGE
 # ============================================================
 
 @app.get("/team-registration")
 def team_registration():
 
-    # Razorpay Test/Live public key is safe to expose to checkout JS.
-    razorpay_key_id = os.environ.get("RAZORPAY_KEY_ID", "")
-
     return render_template(
         "team_registration.html",
-        razorpay_key_id=razorpay_key_id,
+        razorpay_key_id=os.environ.get(
+            "RAZORPAY_KEY_ID",
+            "",
+        ),
     )
 
 
 # ============================================================
-# TEAM INTEREST - CREATE PAYMENT ORDER
+# TEAM INTEREST - CREATE RAZORPAY ORDER
 # ============================================================
 
 @app.post("/api/team-interest/create-order")
 def team_interest_create_order():
 
     if razorpay is None:
+
         return jsonify(
             ok=False,
-            error="Razorpay package is not installed."
+            error=(
+                "Razorpay package is not installed. "
+                "Please redeploy after updating requirements.txt."
+            ),
         ), 500
 
-    key_id = os.environ.get("RAZORPAY_KEY_ID")
-    key_secret = os.environ.get("RAZORPAY_KEY_SECRET")
+    key_id = os.environ.get(
+        "RAZORPAY_KEY_ID"
+    )
+
+    key_secret = os.environ.get(
+        "RAZORPAY_KEY_SECRET"
+    )
 
     if not key_id or not key_secret:
+
         return jsonify(
             ok=False,
-            error="Razorpay test keys are not configured."
+            error="Razorpay test keys are not configured.",
         ), 500
 
     f = request.form
 
-    team_name = f.get("team_name", "").strip()
-    contact_name = f.get("contact_name", "").strip()
-    phone = re.sub(r"\D", "", f.get("phone", ""))
-    email = f.get("email", "").strip().lower()
-    village = f.get("village", "").strip()
-    panchayat = f.get("panchayat", "").strip()
+    team_name = f.get(
+        "team_name",
+        "",
+    ).strip()
+
+    contact_name = f.get(
+        "contact_name",
+        "",
+    ).strip()
+
+    phone = re.sub(
+        r"\D",
+        "",
+        f.get("phone", ""),
+    )
+
+    email = f.get(
+        "email",
+        "",
+    ).strip().lower()
+
+    village = f.get(
+        "village",
+        "",
+    ).strip()
+
+    panchayat = f.get(
+        "panchayat",
+        "",
+    ).strip()
 
     if not all([
         team_name,
@@ -689,46 +658,74 @@ def team_interest_create_order():
         village,
         panchayat,
     ]):
+
         return jsonify(
             ok=False,
-            error="Please complete all required fields."
+            error="Please complete all required fields.",
         ), 400
 
     if len(phone) != 10:
+
         return jsonify(
             ok=False,
-            error="Phone number must be 10 digits."
+            error="Phone number must be 10 digits.",
         ), 400
 
     if panchayat not in PANCHAYATS:
+
         return jsonify(
             ok=False,
-            error="Invalid panchayat selection."
+            error="Invalid panchayat selection.",
         ), 400
 
     c = db()
 
     try:
-        # Create a unique local interest number first.
+
         interest_no = next_team_interest(c)
 
-        # ₹100 = interest/application charge only.
-        # ₹5,000 is the future team registration fee and is NOT collected here.
+        # ₹100
         amount_paise = 10000
 
+        # ----------------------------------------------------
+        # IMPORTANT:
+        # Create Razorpay client using Test API credentials.
+        # ----------------------------------------------------
+
         client = razorpay.Client(
-            auth=(key_id, key_secret)
+            auth=(
+                key_id,
+                key_secret,
+            )
         )
 
-        order = client.order.create({
+        # Check Razorpay credentials before creating order.
+        client.utility.verify_webhook_signature(
+            "{}",
+            "test",
+            "test",
+        ) if False else None
+
+        order_data = {
             "amount": amount_paise,
             "currency": "INR",
             "receipt": interest_no,
+            "payment_capture": 1,
             "notes": {
                 "interest_no": interest_no,
                 "team_name": team_name,
-            }
-        })
+            },
+        }
+
+        order = client.order.create(
+            data=order_data
+        )
+
+        if not order or not order.get("id"):
+
+            raise RuntimeError(
+                "Razorpay did not return an order ID."
+            )
 
         c.execute(
             """
@@ -748,8 +745,13 @@ def team_interest_create_order():
                 paid_amount
             )
             VALUES (
-                %s,%s,%s,%s,%s,%s,%s,
-                5000,100,'Created','Interested',%s,0
+                ?,?,?,?,?,?,?,
+                5000,
+                100,
+                'Created',
+                'Interested',
+                ?,
+                0
             )
             """,
             (
@@ -761,7 +763,7 @@ def team_interest_create_order():
                 village,
                 panchayat,
                 order["id"],
-            )
+            ),
         )
 
         c.commit()
@@ -776,39 +778,65 @@ def team_interest_create_order():
         )
 
     except Exception as e:
+
         c.rollback()
-        print("TEAM PAYMENT ORDER ERROR:", repr(e))
+
+        print(
+            "TEAM PAYMENT ORDER ERROR:",
+            repr(e),
+        )
 
         return jsonify(
             ok=False,
-            error="Unable to start payment. Please try again."
+            error=(
+                "Unable to start payment. "
+                "Please check Razorpay Test API keys "
+                "and try again."
+            ),
         ), 500
 
     finally:
+
         c.close()
 
 
 # ============================================================
-# TEAM INTEREST - VERIFY ₹100 PAYMENT
+# TEAM INTEREST - VERIFY PAYMENT
 # ============================================================
 
 @app.post("/api/team-interest/verify-payment")
 def team_interest_verify_payment():
 
-    key_secret = os.environ.get("RAZORPAY_KEY_SECRET")
+    key_secret = os.environ.get(
+        "RAZORPAY_KEY_SECRET"
+    )
 
     if not key_secret:
+
         return jsonify(
             ok=False,
-            error="Razorpay key is not configured."
+            error="Razorpay key is not configured.",
         ), 500
 
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(
+        silent=True
+    ) or {}
 
-    interest_no = str(data.get("interest_no", "")).strip()
-    order_id = str(data.get("razorpay_order_id", "")).strip()
-    payment_id = str(data.get("razorpay_payment_id", "")).strip()
-    signature = str(data.get("razorpay_signature", "")).strip()
+    interest_no = str(
+        data.get("interest_no", "")
+    ).strip()
+
+    order_id = str(
+        data.get("razorpay_order_id", "")
+    ).strip()
+
+    payment_id = str(
+        data.get("razorpay_payment_id", "")
+    ).strip()
+
+    signature = str(
+        data.get("razorpay_signature", "")
+    ).strip()
 
     if not all([
         interest_no,
@@ -816,12 +844,12 @@ def team_interest_verify_payment():
         payment_id,
         signature,
     ]):
+
         return jsonify(
             ok=False,
-            error="Incomplete payment verification data."
+            error="Incomplete payment verification data.",
         ), 400
 
-    # Razorpay signature verification.
     generated_signature = hmac.new(
         key_secret.encode("utf-8"),
         f"{order_id}|{payment_id}".encode("utf-8"),
@@ -832,14 +860,16 @@ def team_interest_verify_payment():
         generated_signature,
         signature,
     ):
+
         return jsonify(
             ok=False,
-            error="Payment verification failed."
+            error="Payment verification failed.",
         ), 400
 
     c = db()
 
     try:
+
         row = c.execute(
             """
             SELECT *
@@ -854,17 +884,18 @@ def team_interest_verify_payment():
         ).fetchone()
 
         if not row:
+
             return jsonify(
                 ok=False,
-                error="Team interest application not found."
+                error="Team interest application not found.",
             ), 404
 
-        # Idempotent: don't process the same successful payment twice.
         if row["payment_status"] == "Paid":
+
             return jsonify(
                 ok=True,
                 interest_no=interest_no,
-                message="Payment already verified."
+                message="Payment already verified.",
             )
 
         c.execute(
@@ -884,21 +915,36 @@ def team_interest_verify_payment():
 
         c.commit()
 
-        # Email + Google Sheets are deliberately after verified payment.
+        # EMAIL
         try:
+
             send_team_interest_email(
                 email=row["email"],
                 team_name=row["team_name"],
                 contact_name=row["contact_name"],
                 interest_no=row["interest_no"],
             )
-        except Exception as e:
-            print("TEAM EMAIL ERROR:", repr(e))
 
-        try:
-            append_team_interest_to_google_sheet(row)
         except Exception as e:
-            print("GOOGLE SHEETS ERROR:", repr(e))
+
+            print(
+                "TEAM EMAIL ERROR:",
+                repr(e),
+            )
+
+        # GOOGLE SHEETS
+        try:
+
+            append_team_interest_to_google_sheet(
+                row
+            )
+
+        except Exception as e:
+
+            print(
+                "GOOGLE SHEETS ERROR:",
+                repr(e),
+            )
 
         return jsonify(
             ok=True,
@@ -911,15 +957,24 @@ def team_interest_verify_payment():
         )
 
     except Exception as e:
+
         c.rollback()
-        print("TEAM PAYMENT VERIFY ERROR:", repr(e))
+
+        print(
+            "TEAM PAYMENT VERIFY ERROR:",
+            repr(e),
+        )
 
         return jsonify(
             ok=False,
-            error="Payment was received but verification could not be completed."
+            error=(
+                "Payment was received but verification "
+                "could not be completed."
+            ),
         ), 500
 
     finally:
+
         c.close()
 
 
@@ -933,11 +988,30 @@ def send_team_interest_email(
     contact_name,
     interest_no,
 ):
-    smtp_host = os.environ.get("SMTP_HOST")
-    smtp_port = int(os.environ.get("SMTP_PORT", "587"))
-    smtp_user = os.environ.get("SMTP_USERNAME")
-    smtp_password = os.environ.get("SMTP_PASSWORD")
-    from_email = os.environ.get("UPL_FROM_EMAIL", smtp_user or "")
+
+    smtp_host = os.environ.get(
+        "SMTP_HOST"
+    )
+
+    smtp_port = int(
+        os.environ.get(
+            "SMTP_PORT",
+            "587",
+        )
+    )
+
+    smtp_user = os.environ.get(
+        "SMTP_USERNAME"
+    )
+
+    smtp_password = os.environ.get(
+        "SMTP_PASSWORD"
+    )
+
+    from_email = os.environ.get(
+        "UPL_FROM_EMAIL",
+        smtp_user or "",
+    )
 
     if not all([
         smtp_host,
@@ -945,12 +1019,17 @@ def send_team_interest_email(
         smtp_password,
         from_email,
     ]):
+
         raise RuntimeError(
             "SMTP email settings are not configured."
         )
 
     msg = EmailMessage()
-    msg["Subject"] = "UPL – Team Interest Received"
+
+    msg["Subject"] = (
+        "UPL – Team Interest Received"
+    )
+
     msg["From"] = from_email
     msg["To"] = email
 
@@ -962,7 +1041,8 @@ Thank you for showing interest in participating in UPL.
 Team Name: {team_name}
 Interest No.: {interest_no}
 Interest Charge Paid: ₹100
-Actual Team Registration Fee: ₹5,000 (not collected at this stage)
+Actual Team Registration Fee: ₹5,000
+The ₹5,000 registration fee is NOT collected at this stage.
 
 Our UPL Organising Committee will contact you very soon if a team slot is available.
 
@@ -978,38 +1058,46 @@ UPL Organising Committee
         smtp_port,
         timeout=20,
     ) as server:
+
         server.starttls()
+
         server.login(
             smtp_user,
             smtp_password,
         )
-        server.send_message(msg)
+
+        server.send_message(
+            msg
+        )
 
 
 # ============================================================
 # GOOGLE SHEETS
 # ============================================================
 
-def append_team_interest_to_google_sheet(row):
+def append_team_interest_to_google_sheet(
+    row
+):
 
-    # Expected environment variable:
-    # GOOGLE_SERVICE_ACCOUNT_JSON
-    # containing the full Google service-account JSON.
-    # Also set GOOGLE_SHEET_ID to the spreadsheet ID.
     service_json = os.environ.get(
         "GOOGLE_SERVICE_ACCOUNT_JSON"
     )
+
     sheet_id = os.environ.get(
         "GOOGLE_SHEET_ID"
     )
 
     if not service_json or not sheet_id:
+
         raise RuntimeError(
             "Google Sheets settings are not configured."
         )
 
     import gspread
-    from google.oauth2.service_account import Credentials
+
+    from google.oauth2.service_account import (
+        Credentials
+    )
 
     credentials_info = json.loads(
         service_json
@@ -1019,9 +1107,11 @@ def append_team_interest_to_google_sheet(row):
         "https://www.googleapis.com/auth/spreadsheets",
     ]
 
-    credentials = Credentials.from_service_account_info(
-        credentials_info,
-        scopes=scopes,
+    credentials = (
+        Credentials.from_service_account_info(
+            credentials_info,
+            scopes=scopes,
+        )
     )
 
     gc = gspread.authorize(
@@ -1034,8 +1124,8 @@ def append_team_interest_to_google_sheet(row):
 
     worksheet = spreadsheet.sheet1
 
-    # Add headers automatically if the sheet is empty.
     if not worksheet.get_all_values():
+
         worksheet.append_row([
             "Interest No.",
             "Team Name",
@@ -1075,10 +1165,6 @@ def append_team_interest_to_google_sheet(row):
 # LEGACY TEAM INTEREST API
 # ============================================================
 
-# Keep the old endpoint available, but do NOT accept an unpaid
-# team interest application through it. The new flow must verify
-# the ₹100 charge first.
-
 @app.post("/api/team-interest")
 def team_interest_legacy():
 
@@ -1091,6 +1177,7 @@ def team_interest_legacy():
     ), 400
 
 
+# ============================================================
 # PUBLIC TEAMS
 # ============================================================
 
@@ -1112,7 +1199,6 @@ def teams():
     finally:
 
         c.close()
-
 
     return render_template(
         "teams.html",
@@ -1144,7 +1230,6 @@ def players():
 
         c.close()
 
-
     return render_template(
         "players.html",
         players=rows,
@@ -1173,7 +1258,6 @@ def fixtures():
     finally:
 
         c.close()
-
 
     return render_template(
         "fixtures.html",
@@ -1207,7 +1291,6 @@ def pointstable():
 
         c.close()
 
-
     return render_template(
         "points.html",
         points=rows,
@@ -1238,7 +1321,6 @@ def news():
 
         c.close()
 
-
     return render_template(
         "news.html",
         news=rows,
@@ -1267,7 +1349,6 @@ def gallery():
     finally:
 
         c.close()
-
 
     return render_template(
         "gallery.html",
@@ -1300,7 +1381,6 @@ def admin_login_post():
         "",
     )
 
-
     c = db()
 
     try:
@@ -1318,7 +1398,6 @@ def admin_login_post():
 
         c.close()
 
-
     if row and check_password_hash(
         row["password_hash"],
         password,
@@ -1326,8 +1405,9 @@ def admin_login_post():
 
         session["admin"] = True
 
-        return redirect("/admin")
-
+        return redirect(
+            "/admin"
+        )
 
     return render_template(
         "login.html",
@@ -1365,7 +1445,6 @@ def admin():
             """
         ).fetchall()
 
-
         teams = c.execute(
             """
             SELECT *
@@ -1373,7 +1452,6 @@ def admin():
             ORDER BY name
             """
         ).fetchall()
-
 
         fixtures = c.execute(
             """
@@ -1383,7 +1461,6 @@ def admin():
             """
         ).fetchall()
 
-
         news_rows = c.execute(
             """
             SELECT *
@@ -1391,7 +1468,6 @@ def admin():
             ORDER BY id DESC
             """
         ).fetchall()
-
 
         points = c.execute(
             """
@@ -1401,7 +1477,6 @@ def admin():
             """
         ).fetchall()
 
-
         gallery_rows = c.execute(
             """
             SELECT *
@@ -1409,7 +1484,6 @@ def admin():
             ORDER BY id DESC
             """
         ).fetchall()
-
 
         team_interests = c.execute(
             """
@@ -1419,11 +1493,9 @@ def admin():
             """
         ).fetchall()
 
-
     finally:
 
         c.close()
-
 
     return render_template(
         "admin.html",
@@ -1445,7 +1517,10 @@ def admin():
     "/admin/player/<int:id>/<action>"
 )
 @admin_required
-def player_action(id, action):
+def player_action(
+    id,
+    action,
+):
 
     allowed = {
         "Approved",
@@ -1453,11 +1528,11 @@ def player_action(id, action):
         "Pending",
     }
 
-
     if action not in allowed:
 
-        return redirect("/admin")
-
+        return redirect(
+            "/admin"
+        )
 
     c = db()
 
@@ -1481,8 +1556,9 @@ def player_action(id, action):
 
         c.close()
 
-
-    return redirect("/admin")
+    return redirect(
+        "/admin"
+    )
 
 
 # ============================================================
@@ -1502,7 +1578,6 @@ def team_add():
         "description",
         "",
     ).strip()
-
 
     if name:
 
@@ -1535,8 +1610,9 @@ def team_add():
 
             c.close()
 
-
-    return redirect("/admin")
+    return redirect(
+        "/admin"
+    )
 
 
 @app.post(
@@ -1563,8 +1639,9 @@ def team_delete(id):
 
         c.close()
 
-
-    return redirect("/admin")
+    return redirect(
+        "/admin"
+    )
 
 
 # ============================================================
@@ -1587,11 +1664,11 @@ def team_interest_status(
         "Rejected",
     }
 
-
     if status not in allowed:
 
-        return redirect("/admin")
-
+        return redirect(
+            "/admin"
+        )
 
     c = db()
 
@@ -1615,8 +1692,9 @@ def team_interest_status(
 
         c.close()
 
-
-    return redirect("/admin")
+    return redirect(
+        "/admin"
+    )
 
 
 # ============================================================
@@ -1646,14 +1724,7 @@ def fixture_add():
                 result_text
             )
             VALUES(
-                ?,
-                ?,
-                ?,
-                ?,
-                ?,
-                ?,
-                ?,
-                ?
+                ?,?,?,?,?,?,?,?
             )
             """,
             (
@@ -1677,8 +1748,9 @@ def fixture_add():
 
         c.close()
 
-
-    return redirect("/admin")
+    return redirect(
+        "/admin"
+    )
 
 
 @app.post(
@@ -1705,8 +1777,9 @@ def fixture_delete(id):
 
         c.close()
 
-
-    return redirect("/admin")
+    return redirect(
+        "/admin"
+    )
 
 
 # ============================================================
@@ -1726,7 +1799,6 @@ def news_add():
         "body",
         "",
     ).strip()
-
 
     if title and body:
 
@@ -1759,8 +1831,9 @@ def news_add():
 
             c.close()
 
-
-    return redirect("/admin")
+    return redirect(
+        "/admin"
+    )
 
 
 @app.post(
@@ -1787,8 +1860,9 @@ def news_delete(id):
 
         c.close()
 
-
-    return redirect("/admin")
+    return redirect(
+        "/admin"
+    )
 
 
 # ============================================================
@@ -1805,7 +1879,6 @@ def points_add():
         "team_name",
         "",
     ).strip()
-
 
     if team:
 
@@ -1825,13 +1898,7 @@ def points_add():
                     nrr
                 )
                 VALUES(
-                    ?,
-                    ?,
-                    ?,
-                    ?,
-                    ?,
-                    ?,
-                    ?
+                    ?,?,?,?,?,?,?
                 )
                 ON CONFLICT(team_name)
                 DO UPDATE SET
@@ -1844,12 +1911,30 @@ def points_add():
                 """,
                 (
                     team,
-                    int(f.get("played") or 0),
-                    int(f.get("won") or 0),
-                    int(f.get("lost") or 0),
-                    int(f.get("tied") or 0),
-                    int(f.get("points") or 0),
-                    float(f.get("nrr") or 0),
+                    int(
+                        f.get("played")
+                        or 0
+                    ),
+                    int(
+                        f.get("won")
+                        or 0
+                    ),
+                    int(
+                        f.get("lost")
+                        or 0
+                    ),
+                    int(
+                        f.get("tied")
+                        or 0
+                    ),
+                    int(
+                        f.get("points")
+                        or 0
+                    ),
+                    float(
+                        f.get("nrr")
+                        or 0
+                    ),
                 ),
             )
 
@@ -1859,8 +1944,9 @@ def points_add():
 
             c.close()
 
-
-    return redirect("/admin")
+    return redirect(
+        "/admin"
+    )
 
 
 @app.post(
@@ -1887,8 +1973,9 @@ def points_delete(id):
 
         c.close()
 
-
-    return redirect("/admin")
+    return redirect(
+        "/admin"
+    )
 
 
 # ============================================================
@@ -1908,16 +1995,15 @@ def gallery_add():
         "",
     ).strip()
 
-
     if not image or not image.filename:
 
-        return redirect("/admin")
-
+        return redirect(
+            "/admin"
+        )
 
     ext = Path(
         image.filename
     ).suffix.lower()
-
 
     if ext not in {
         ".jpg",
@@ -1926,8 +2012,9 @@ def gallery_add():
         ".webp",
     }:
 
-        return redirect("/admin")
-
+        return redirect(
+            "/admin"
+        )
 
     c = None
 
@@ -1941,21 +2028,17 @@ def gallery_add():
                 "Cloudinary is not configured."
             )
 
-
         upload_result = cloudinary.uploader.upload(
             image,
             folder="upl/gallery",
             resource_type="image",
         )
 
-
         image_url = upload_result[
             "secure_url"
         ]
 
-
         c = db()
-
 
         c.execute(
             """
@@ -1974,9 +2057,7 @@ def gallery_add():
             ),
         )
 
-
         c.commit()
-
 
     except Exception as e:
 
@@ -1989,15 +2070,15 @@ def gallery_add():
 
             c.rollback()
 
-
     finally:
 
         if c:
 
             c.close()
 
-
-    return redirect("/admin")
+    return redirect(
+        "/admin"
+    )
 
 
 @app.post(
@@ -2024,8 +2105,9 @@ def gallery_delete(id):
 
         c.close()
 
-
-    return redirect("/admin")
+    return redirect(
+        "/admin"
+    )
 
 
 # ============================================================
