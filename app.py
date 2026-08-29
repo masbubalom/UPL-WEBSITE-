@@ -204,16 +204,21 @@ def admin_required(fn):
     return wrapped
 
 
-def next_player_registration(c):
+def next_reg(c):
 
-    row = c.execute(
-        """
-        SELECT COALESCE(MAX(id), 0) + 1 AS next_id
-        FROM players
-        """
-    ).fetchone()
+    while True:
 
-    return f"UPL25-{row['next_id']:04d}"
+        random_part = secrets.token_hex(4).upper()[:6]
+
+        registration_no = f"UPL26-{random_part}"
+
+        existing = c.execute(
+            "SELECT 1 FROM players WHERE registration_no=?",
+            (registration_no,)
+        ).fetchone()
+
+        if not existing:
+            return registration_no
 
 
 def next_team_interest(c):
@@ -222,7 +227,7 @@ def next_team_interest(c):
 
         random_part = secrets.token_hex(4).upper()[:6]
 
-        interest_no = f"UPL-TI-{random_part}"
+        interest_no = f"UPL-26-TI-{random_part}"
 
         existing = c.execute(
             "SELECT 1 FROM team_interest WHERE interest_no=?",
