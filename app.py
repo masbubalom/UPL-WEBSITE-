@@ -776,16 +776,22 @@ def team_interest_create_order():
             currency="INR",
             interest_no=interest_no,
         )
-except Exception as e:
-    c.rollback()
 
-    error_message = repr(e)
-    print("TEAM PAYMENT ORDER ERROR:", error_message)
+    except Exception as e:
 
-    return jsonify(
-        ok=False,
-        error=f"Payment error: {error_message}"
-    ), 500
+        c.rollback()
+
+        error_message = repr(e)
+
+        print(
+            "TEAM PAYMENT ORDER ERROR:",
+            error_message,
+        )
+
+        return jsonify(
+            ok=False,
+            error=f"Payment error: {error_message}",
+        ), 500
 
     finally:
 
