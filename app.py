@@ -145,7 +145,7 @@ def create_extra_tables():
 
         c.execute(
             """
-            CREATE TABLE IF NOT EXISTS team_interests (
+            CREATE TABLE IF NOT EXISTS team_interest (
                 id SERIAL PRIMARY KEY,
                 interest_no TEXT UNIQUE NOT NULL,
                 team_name TEXT NOT NULL,
@@ -165,6 +165,21 @@ def create_extra_tables():
             )
             """
         )
+
+        # Existing databases created by the earlier version may have the
+        # basic team_interest table without these newer payment columns.
+        c.execute("ALTER TABLE team_interest ADD COLUMN IF NOT EXISTS razorpay_order_id TEXT")
+        c.execute("ALTER TABLE team_interest ADD COLUMN IF NOT EXISTS razorpay_payment_id TEXT")
+        c.execute("ALTER TABLE team_interest ADD COLUMN IF NOT EXISTS paid_amount INTEGER DEFAULT 0")
+        c.execute("ALTER TABLE team_interest ADD COLUMN IF NOT EXISTS registration_fee INTEGER DEFAULT 5000")
+        c.execute("ALTER TABLE team_interest ADD COLUMN IF NOT EXISTS interest_charge INTEGER DEFAULT 100")
+        c.execute("ALTER TABLE team_interest ADD COLUMN IF NOT EXISTS payment_status TEXT DEFAULT 'Pending'")
+        c.execute("ALTER TABLE team_interest ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'Pending'")
+        c.execute("ALTER TABLE team_interest ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+        c.execute("ALTER TABLE team_interest ADD COLUMN IF NOT EXISTS contact_name TEXT")
+        c.execute("ALTER TABLE team_interest ADD COLUMN IF NOT EXISTS representative_name TEXT")
+        c.execute("ALTER TABLE team_interest ADD COLUMN IF NOT EXISTS payment_reference TEXT")
+        c.execute("UPDATE team_interest SET contact_name = representative_name WHERE contact_name IS NULL AND representative_name IS NOT NULL")
 
         c.commit()
 
@@ -477,7 +492,7 @@ def register():
 
     try:
 
-        registration_no = next_player_registration(c)
+        registration_no = next_reg(c)
 
         safe_name = re.sub(
             r"[^A-Za-z0-9_-]",
@@ -542,6 +557,17 @@ def register():
         )
 
         c.commit()
+
+        # Save the complete player application to Google Sheets.
+        try:
+            saved_player = c.execute(
+                "SELECT * FROM players WHERE registration_no = ?",
+                (registration_no,),
+            ).fetchone()
+            append_player_to_google_sheet(saved_player)
+        except Exception as e:
+            # Registration remains successful even if Sheets is temporarily unavailable.
+            print("PLAYER GOOGLE SHEETS ERROR:", repr(e))
 
         return jsonify(
             ok=True,
@@ -739,10 +765,11 @@ def team_interest_create_order():
 
         c.execute(
             """
-            INSERT INTO team_interests (
+            INSERT INTO team_interest (
                 interest_no,
                 team_name,
                 contact_name,
+                representative_name,
                 phone,
                 email,
                 village,
@@ -755,7 +782,7 @@ def team_interest_create_order():
                 paid_amount
             )
             VALUES (
-                ?,?,?,?,?,?,?,
+                ?,?,?,?,?,?,?,?,
                 5000,
                 100,
                 'Created',
@@ -767,6 +794,7 @@ def team_interest_create_order():
             (
                 interest_no,
                 team_name,
+                contact_name,
                 contact_name,
                 phone,
                 email,
@@ -881,7 +909,7 @@ def team_interest_verify_payment():
         row = c.execute(
             """
             SELECT *
-            FROM team_interests
+            FROM team_interest
             WHERE interest_no = ?
               AND razorpay_order_id = ?
             """,
@@ -908,7 +936,7 @@ def team_interest_verify_payment():
 
         c.execute(
             """
-            UPDATE team_interests
+            UPDATE team_interest
             SET
                 payment_status = 'Paid',
                 razorpay_payment_id = ?,
@@ -923,14 +951,20 @@ def team_interest_verify_payment():
 
         c.commit()
 
+        # Fetch the updated row so Google Sheets gets payment ID/status too.
+        updated_row = c.execute(
+            "SELECT * FROM team_interest WHERE id = ?",
+            (row["id"],),
+        ).fetchone()
+
         # EMAIL
         try:
 
             send_team_interest_email(
-                email=row["email"],
-                team_name=row["team_name"],
-                contact_name=row["contact_name"],
-                interest_no=row["interest_no"],
+                email=updated_row["email"],
+                team_name=updated_row["team_name"],
+                contact_name=updated_row["contact_name"],
+                interest_no=updated_row["interest_no"],
             )
 
         except Exception as e:
@@ -944,7 +978,7 @@ def team_interest_verify_payment():
         try:
 
             append_team_interest_to_google_sheet(
-                row
+                updated_row
             )
 
         except Exception as e:
@@ -984,6 +1018,128 @@ def team_interest_verify_payment():
     finally:
 
         c.close()
+
+
+# ============================================================
+# GOOGLE SHEETS HELPERS
+# ============================================================
+
+def get_google_worksheet(title, headers):
+
+    service_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
+    sheet_id = os.environ.get("GOOGLE_SHEET_ID")
+
+    if not service_json or not sheet_id:
+        raise RuntimeError(
+            "Google Sheets settings are not configured."
+        )
+
+    import gspread
+    from google.oauth2.service_account import Credentials
+
+    credentials_info = json.loads(service_json)
+
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+    ]
+
+    credentials = Credentials.from_service_account_info(
+        credentials_info,
+        scopes=scopes,
+    )
+
+    gc = gspread.authorize(credentials)
+    spreadsheet = gc.open_by_key(sheet_id)
+
+    try:
+        worksheet = spreadsheet.worksheet(title)
+    except Exception:
+        worksheet = spreadsheet.add_worksheet(
+            title=title,
+            rows=1000,
+            cols=max(len(headers), 20),
+        )
+
+    if not worksheet.get_all_values():
+        worksheet.append_row(headers)
+
+    return worksheet
+
+
+def append_player_to_google_sheet(row):
+
+    headers = [
+        "Registration No.",
+        "Name",
+        "Age",
+        "Phone",
+        "Email",
+        "Village",
+        "Gram Panchayat",
+        "Role",
+        "Batting",
+        "Bowling",
+        "Status",
+        "Photo URL",
+    ]
+
+    worksheet = get_google_worksheet("Players", headers)
+
+    worksheet.append_row([
+        row["registration_no"],
+        row["full_name"],
+        row["age"],
+        row["phone"],
+        row["email"],
+        row["village"],
+        row["gram_panchayat"],
+        row["primary_role"],
+        row["batting_style"] or "-",
+        row["bowling_style"] or "-",
+        row["status"],
+        row["photo_path"] or "",
+    ])
+
+
+def append_team_interest_to_google_sheet(row):
+
+    headers = [
+        "Interest No.",
+        "Team Name",
+        "Contact Name",
+        "Phone",
+        "Email",
+        "Village",
+        "Gram Panchayat",
+        "Registration Fee",
+        "Interest Charge",
+        "Payment Status",
+        "Status",
+        "Razorpay Order ID",
+        "Razorpay Payment ID",
+        "Paid Amount",
+        "Created At",
+    ]
+
+    worksheet = get_google_worksheet("Team Registrations", headers)
+
+    worksheet.append_row([
+        row["interest_no"],
+        row["team_name"],
+        row["contact_name"],
+        row["phone"],
+        row["email"],
+        row["village"],
+        row["gram_panchayat"],
+        row["registration_fee"],
+        row["interest_charge"],
+        row["payment_status"],
+        row["status"],
+        row["razorpay_order_id"] or "",
+        row["razorpay_payment_id"] or "",
+        row["paid_amount"],
+        str(row["created_at"]),
+    ])
 
 
 # ============================================================
@@ -1082,92 +1238,6 @@ UPL Organising Committee
 # ============================================================
 # GOOGLE SHEETS
 # ============================================================
-
-def append_team_interest_to_google_sheet(
-    row
-):
-
-    service_json = os.environ.get(
-        "GOOGLE_SERVICE_ACCOUNT_JSON"
-    )
-
-    sheet_id = os.environ.get(
-        "GOOGLE_SHEET_ID"
-    )
-
-    if not service_json or not sheet_id:
-
-        raise RuntimeError(
-            "Google Sheets settings are not configured."
-        )
-
-    import gspread
-
-    from google.oauth2.service_account import (
-        Credentials
-    )
-
-    credentials_info = json.loads(
-        service_json
-    )
-
-    scopes = [
-        "https://www.googleapis.com/auth/spreadsheets",
-    ]
-
-    credentials = (
-        Credentials.from_service_account_info(
-            credentials_info,
-            scopes=scopes,
-        )
-    )
-
-    gc = gspread.authorize(
-        credentials
-    )
-
-    spreadsheet = gc.open_by_key(
-        sheet_id
-    )
-
-    worksheet = spreadsheet.sheet1
-
-    if not worksheet.get_all_values():
-
-        worksheet.append_row([
-            "Interest No.",
-            "Team Name",
-            "Contact Name",
-            "Phone",
-            "Email",
-            "Village",
-            "Gram Panchayat",
-            "Registration Fee",
-            "Interest Charge",
-            "Payment Status",
-            "Status",
-            "Razorpay Order ID",
-            "Razorpay Payment ID",
-            "Created At",
-        ])
-
-    worksheet.append_row([
-        row["interest_no"],
-        row["team_name"],
-        row["contact_name"],
-        row["phone"],
-        row["email"],
-        row["village"],
-        row["gram_panchayat"],
-        row["registration_fee"],
-        row["interest_charge"],
-        "Paid",
-        row["status"],
-        row["razorpay_order_id"],
-        "",
-        str(row["created_at"]),
-    ])
-
 
 # ============================================================
 # LEGACY TEAM INTEREST API
@@ -1493,10 +1563,10 @@ def admin():
             """
         ).fetchall()
 
-        team_interests = c.execute(
+        team_interest = c.execute(
             """
             SELECT *
-            FROM team_interests
+            FROM team_interest
             ORDER BY id DESC
             """
         ).fetchall()
@@ -1513,7 +1583,7 @@ def admin():
         news=news_rows,
         points=points,
         gallery=gallery_rows,
-        team_interests=team_interests,
+        team_interest=team_interest,
     )
 
 
@@ -1684,7 +1754,7 @@ def team_interest_status(
 
         c.execute(
             """
-            UPDATE team_interests
+            UPDATE team_interest
             SET status = ?
             WHERE id = ?
             """,
