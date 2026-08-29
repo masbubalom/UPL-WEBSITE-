@@ -7,6 +7,11 @@ from functools import wraps
 import psycopg
 import cloudinary
 import cloudinary.uploader
+import hmac
+import hashlib
+import json
+import smtplib
+from email.message import EmailMessage
 from psycopg.rows import dict_row
 
 from flask import (
@@ -19,6 +24,11 @@ from flask import (
 )
 
 from werkzeug.security import check_password_hash
+
+try:
+    import razorpay
+except ImportError:
+    razorpay = None
 
 
 # ============================================================
@@ -148,6 +158,9 @@ def create_extra_tables():
                 interest_charge INTEGER DEFAULT 100,
                 payment_status TEXT DEFAULT 'Pending',
                 status TEXT DEFAULT 'Interested',
+                razorpay_order_id TEXT,
+                razorpay_payment_id TEXT,
+                paid_amount INTEGER DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
             """
@@ -628,52 +641,45 @@ def register():
 @app.get("/team-registration")
 def team_registration():
 
+    # Razorpay Test/Live public key is safe to expose to checkout JS.
+    razorpay_key_id = os.environ.get("RAZORPAY_KEY_ID", "")
+
     return render_template(
-        "team_registration.html"
+        "team_registration.html",
+        razorpay_key_id=razorpay_key_id,
     )
 
 
 # ============================================================
-# TEAM INTEREST API
+# TEAM INTEREST - CREATE PAYMENT ORDER
 # ============================================================
 
-@app.post("/api/team-interest")
-def team_interest():
+@app.post("/api/team-interest/create-order")
+def team_interest_create_order():
+
+    if razorpay is None:
+        return jsonify(
+            ok=False,
+            error="Razorpay package is not installed."
+        ), 500
+
+    key_id = os.environ.get("RAZORPAY_KEY_ID")
+    key_secret = os.environ.get("RAZORPAY_KEY_SECRET")
+
+    if not key_id or not key_secret:
+        return jsonify(
+            ok=False,
+            error="Razorpay test keys are not configured."
+        ), 500
 
     f = request.form
 
-
-    team_name = f.get(
-        "team_name",
-        "",
-    ).strip()
-
-    contact_name = f.get(
-        "contact_name",
-        "",
-    ).strip()
-
-    phone = re.sub(
-        r"\D",
-        "",
-        f.get("phone", ""),
-    )
-
-    email = f.get(
-        "email",
-        "",
-    ).strip().lower()
-
-    village = f.get(
-        "village",
-        "",
-    ).strip()
-
-    panchayat = f.get(
-        "panchayat",
-        "",
-    ).strip()
-
+    team_name = f.get("team_name", "").strip()
+    contact_name = f.get("contact_name", "").strip()
+    phone = re.sub(r"\D", "", f.get("phone", ""))
+    email = f.get("email", "").strip().lower()
+    village = f.get("village", "").strip()
+    panchayat = f.get("panchayat", "").strip()
 
     if not all([
         team_name,
@@ -683,35 +689,46 @@ def team_interest():
         village,
         panchayat,
     ]):
-
         return jsonify(
             ok=False,
-            error="Please complete all required fields.",
+            error="Please complete all required fields."
         ), 400
-
 
     if len(phone) != 10:
-
         return jsonify(
             ok=False,
-            error="Phone number must be 10 digits.",
+            error="Phone number must be 10 digits."
         ), 400
-
 
     if panchayat not in PANCHAYATS:
-
         return jsonify(
             ok=False,
-            error="Invalid panchayat selection.",
+            error="Invalid panchayat selection."
         ), 400
-
 
     c = db()
 
     try:
-
+        # Create a unique local interest number first.
         interest_no = next_team_interest(c)
 
+        # ₹100 = interest/application charge only.
+        # ₹5,000 is the future team registration fee and is NOT collected here.
+        amount_paise = 10000
+
+        client = razorpay.Client(
+            auth=(key_id, key_secret)
+        )
+
+        order = client.order.create({
+            "amount": amount_paise,
+            "currency": "INR",
+            "receipt": interest_no,
+            "notes": {
+                "interest_no": interest_no,
+                "team_name": team_name,
+            }
+        })
 
         c.execute(
             """
@@ -726,20 +743,13 @@ def team_interest():
                 registration_fee,
                 interest_charge,
                 payment_status,
-                status
+                status,
+                razorpay_order_id,
+                paid_amount
             )
             VALUES (
-                %s,
-                %s,
-                %s,
-                %s,
-                %s,
-                %s,
-                %s,
-                5000,
-                100,
-                'Pending',
-                'Interested'
+                %s,%s,%s,%s,%s,%s,%s,
+                5000,100,'Created','Interested',%s,0
             )
             """,
             (
@@ -750,12 +760,145 @@ def team_interest():
                 email,
                 village,
                 panchayat,
-            ),
+                order["id"],
+            )
         )
-
 
         c.commit()
 
+        return jsonify(
+            ok=True,
+            key_id=key_id,
+            order_id=order["id"],
+            amount=amount_paise,
+            currency="INR",
+            interest_no=interest_no,
+        )
+
+    except Exception as e:
+        c.rollback()
+        print("TEAM PAYMENT ORDER ERROR:", repr(e))
+
+        return jsonify(
+            ok=False,
+            error="Unable to start payment. Please try again."
+        ), 500
+
+    finally:
+        c.close()
+
+
+# ============================================================
+# TEAM INTEREST - VERIFY ₹100 PAYMENT
+# ============================================================
+
+@app.post("/api/team-interest/verify-payment")
+def team_interest_verify_payment():
+
+    key_secret = os.environ.get("RAZORPAY_KEY_SECRET")
+
+    if not key_secret:
+        return jsonify(
+            ok=False,
+            error="Razorpay key is not configured."
+        ), 500
+
+    data = request.get_json(silent=True) or {}
+
+    interest_no = str(data.get("interest_no", "")).strip()
+    order_id = str(data.get("razorpay_order_id", "")).strip()
+    payment_id = str(data.get("razorpay_payment_id", "")).strip()
+    signature = str(data.get("razorpay_signature", "")).strip()
+
+    if not all([
+        interest_no,
+        order_id,
+        payment_id,
+        signature,
+    ]):
+        return jsonify(
+            ok=False,
+            error="Incomplete payment verification data."
+        ), 400
+
+    # Razorpay signature verification.
+    generated_signature = hmac.new(
+        key_secret.encode("utf-8"),
+        f"{order_id}|{payment_id}".encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+    if not hmac.compare_digest(
+        generated_signature,
+        signature,
+    ):
+        return jsonify(
+            ok=False,
+            error="Payment verification failed."
+        ), 400
+
+    c = db()
+
+    try:
+        row = c.execute(
+            """
+            SELECT *
+            FROM team_interests
+            WHERE interest_no = ?
+              AND razorpay_order_id = ?
+            """,
+            (
+                interest_no,
+                order_id,
+            ),
+        ).fetchone()
+
+        if not row:
+            return jsonify(
+                ok=False,
+                error="Team interest application not found."
+            ), 404
+
+        # Idempotent: don't process the same successful payment twice.
+        if row["payment_status"] == "Paid":
+            return jsonify(
+                ok=True,
+                interest_no=interest_no,
+                message="Payment already verified."
+            )
+
+        c.execute(
+            """
+            UPDATE team_interests
+            SET
+                payment_status = 'Paid',
+                razorpay_payment_id = ?,
+                paid_amount = 100
+            WHERE id = ?
+            """,
+            (
+                payment_id,
+                row["id"],
+            ),
+        )
+
+        c.commit()
+
+        # Email + Google Sheets are deliberately after verified payment.
+        try:
+            send_team_interest_email(
+                email=row["email"],
+                team_name=row["team_name"],
+                contact_name=row["contact_name"],
+                interest_no=row["interest_no"],
+            )
+        except Exception as e:
+            print("TEAM EMAIL ERROR:", repr(e))
+
+        try:
+            append_team_interest_to_google_sheet(row)
+        except Exception as e:
+            print("GOOGLE SHEETS ERROR:", repr(e))
 
         return jsonify(
             ok=True,
@@ -767,28 +910,187 @@ def team_interest():
             ),
         )
 
-
     except Exception as e:
-
         c.rollback()
-
-        print(
-            "TEAM INTEREST ERROR:",
-            repr(e),
-        )
+        print("TEAM PAYMENT VERIFY ERROR:", repr(e))
 
         return jsonify(
             ok=False,
-            error="Unable to submit your interest right now.",
+            error="Payment was received but verification could not be completed."
         ), 500
 
-
     finally:
-
         c.close()
 
 
 # ============================================================
+# TEAM EMAIL
+# ============================================================
+
+def send_team_interest_email(
+    email,
+    team_name,
+    contact_name,
+    interest_no,
+):
+    smtp_host = os.environ.get("SMTP_HOST")
+    smtp_port = int(os.environ.get("SMTP_PORT", "587"))
+    smtp_user = os.environ.get("SMTP_USERNAME")
+    smtp_password = os.environ.get("SMTP_PASSWORD")
+    from_email = os.environ.get("UPL_FROM_EMAIL", smtp_user or "")
+
+    if not all([
+        smtp_host,
+        smtp_user,
+        smtp_password,
+        from_email,
+    ]):
+        raise RuntimeError(
+            "SMTP email settings are not configured."
+        )
+
+    msg = EmailMessage()
+    msg["Subject"] = "UPL – Team Interest Received"
+    msg["From"] = from_email
+    msg["To"] = email
+
+    msg.set_content(
+        f"""Dear {contact_name},
+
+Thank you for showing interest in participating in UPL.
+
+Team Name: {team_name}
+Interest No.: {interest_no}
+Interest Charge Paid: ₹100
+Actual Team Registration Fee: ₹5,000 (not collected at this stage)
+
+Our UPL Organising Committee will contact you very soon if a team slot is available.
+
+Please keep your Interest Number for future communication.
+
+Thanks & regards,
+UPL Organising Committee
+"""
+    )
+
+    with smtplib.SMTP(
+        smtp_host,
+        smtp_port,
+        timeout=20,
+    ) as server:
+        server.starttls()
+        server.login(
+            smtp_user,
+            smtp_password,
+        )
+        server.send_message(msg)
+
+
+# ============================================================
+# GOOGLE SHEETS
+# ============================================================
+
+def append_team_interest_to_google_sheet(row):
+
+    # Expected environment variable:
+    # GOOGLE_SERVICE_ACCOUNT_JSON
+    # containing the full Google service-account JSON.
+    # Also set GOOGLE_SHEET_ID to the spreadsheet ID.
+    service_json = os.environ.get(
+        "GOOGLE_SERVICE_ACCOUNT_JSON"
+    )
+    sheet_id = os.environ.get(
+        "GOOGLE_SHEET_ID"
+    )
+
+    if not service_json or not sheet_id:
+        raise RuntimeError(
+            "Google Sheets settings are not configured."
+        )
+
+    import gspread
+    from google.oauth2.service_account import Credentials
+
+    credentials_info = json.loads(
+        service_json
+    )
+
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+    ]
+
+    credentials = Credentials.from_service_account_info(
+        credentials_info,
+        scopes=scopes,
+    )
+
+    gc = gspread.authorize(
+        credentials
+    )
+
+    spreadsheet = gc.open_by_key(
+        sheet_id
+    )
+
+    worksheet = spreadsheet.sheet1
+
+    # Add headers automatically if the sheet is empty.
+    if not worksheet.get_all_values():
+        worksheet.append_row([
+            "Interest No.",
+            "Team Name",
+            "Contact Name",
+            "Phone",
+            "Email",
+            "Village",
+            "Gram Panchayat",
+            "Registration Fee",
+            "Interest Charge",
+            "Payment Status",
+            "Status",
+            "Razorpay Order ID",
+            "Razorpay Payment ID",
+            "Created At",
+        ])
+
+    worksheet.append_row([
+        row["interest_no"],
+        row["team_name"],
+        row["contact_name"],
+        row["phone"],
+        row["email"],
+        row["village"],
+        row["gram_panchayat"],
+        row["registration_fee"],
+        row["interest_charge"],
+        "Paid",
+        row["status"],
+        row["razorpay_order_id"],
+        "",
+        str(row["created_at"]),
+    ])
+
+
+# ============================================================
+# LEGACY TEAM INTEREST API
+# ============================================================
+
+# Keep the old endpoint available, but do NOT accept an unpaid
+# team interest application through it. The new flow must verify
+# the ₹100 charge first.
+
+@app.post("/api/team-interest")
+def team_interest_legacy():
+
+    return jsonify(
+        ok=False,
+        error=(
+            "Please use the Team Registration payment form. "
+            "A ₹100 interest charge is required."
+        ),
+    ), 400
+
+
 # PUBLIC TEAMS
 # ============================================================
 
