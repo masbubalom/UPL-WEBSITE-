@@ -1,4 +1,7 @@
-Flask>=3.0,<4.0
-Werkzeug>=3.0,<4.0
+Flask
 psycopg[binary]
 cloudinary
+Werkzeug
+razorpay
+gspread
+google-auth
