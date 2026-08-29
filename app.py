@@ -218,14 +218,19 @@ def next_player_registration(c):
 
 def next_team_interest(c):
 
-    row = c.execute(
-        """
-        SELECT COALESCE(MAX(id), 0) + 1 AS next_id
-        FROM team_interests
-        """
-    ).fetchone()
+    while True:
 
-    return f"UPL-TI-{row['next_id']:04d}"
+        random_part = secrets.token_hex(4).upper()[:6]
+
+        interest_no = f"UPL-TI-{random_part}"
+
+        existing = c.execute(
+            "SELECT 1 FROM team_interest WHERE interest_no=?",
+            (interest_no,)
+        ).fetchone()
+
+        if not existing:
+            return interest_no
 
 
 @app.context_processor
