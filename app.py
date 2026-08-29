@@ -776,24 +776,16 @@ def team_interest_create_order():
             currency="INR",
             interest_no=interest_no,
         )
+except Exception as e:
+    c.rollback()
 
-    except Exception as e:
+    error_message = repr(e)
+    print("TEAM PAYMENT ORDER ERROR:", error_message)
 
-        c.rollback()
-
-        print(
-            "TEAM PAYMENT ORDER ERROR:",
-            repr(e),
-        )
-
-        return jsonify(
-            ok=False,
-            error=(
-                "Unable to start payment. "
-                "Please check Razorpay Test API keys "
-                "and try again."
-            ),
-        ), 500
+    return jsonify(
+        ok=False,
+        error=f"Payment error: {error_message}"
+    ), 500
 
     finally:
 
