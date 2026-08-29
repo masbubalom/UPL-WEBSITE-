@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>UPL Team Registration</title>
+<link rel="stylesheet" href="/static/style.css">
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+</head>
+
+<body>
+
+<div class="nav">
+    <a href="/">UPL</a>
+    <div>
+        <a href="/">HOME</a>
+        <a href="/players">PLAYERS</a>
+        <a href="/teams">TEAMS</a>
+        <a href="/fixtures">FIXTURES</a>
+        <a href="/points-table">POINTS TABLE</a>
+        <a href="/news">NEWS</a>
+        <a href="/gallery">GALLERY</a>
+    </div>
+</div>
+
+<main class="wrap">
+
+<div class="banner">
+    <h1>TEAM REGISTRATION</h1>
+    <p class="muted">
+        Show your interest in participating in UPL.
+    </p>
+</div>
+
+<section class="admin-section">
+<div class="card">
+
+<p>
+<strong>Team Registration Fee: ₹5,000</strong><br>
+<span class="muted">
+The ₹5,000 registration fee is NOT being collected now.
+</span>
+</p>
+
+<p>
+<strong>Interest/Application Charge: ₹100</strong><br>
+<span class="muted">
+A ₹100 charge is required to submit your team interest.
+</span>
+</p>
+
+<form id="teamForm" class="grid">
+
+<div>
+<label>Team Name</label>
+<input name="team_name" required>
+</div>
+
+<div>
+<label>Contact Person</label>
+<input name="contact_name" required>
+</div>
+
+<div>
+<label>Phone / WhatsApp</label>
+<input name="phone" inputmode="numeric" maxlength="10" required>
+</div>
+
+<div>
+<label>Email</label>
+<input name="email" type="email" required>
+</div>
+
+<div>
+<label>Village</label>
+<input name="village" required>
+</div>
+
+<div>
+<label>Gram Panchayat</label>
+<select name="panchayat" required>
+<option value="">Select Panchayat</option>
+{% for p in panchayats %}
+<option value="{{p}}">{{p}}</option>
+{% endfor %}
+</select>
+</div>
+
+<div class="full">
+<button class="btn" id="payBtn" type="submit">
+PAY ₹100 & SHOW INTEREST
+</button>
+</div>
+
+</form>
+
+<div id="message" style="margin-top:15px"></div>
+
+</div>
+</section>
+
+</main>
+
+<script>
+const form = document.getElementById("teamForm");
+const message = document.getElementById("message");
+const payBtn = document.getElementById("payBtn");
+
+function showMessage(text, success=false) {
+    message.textContent = text;
+    message.style.padding = "12px";
+    message.style.borderRadius = "8px";
+    message.style.background = success ? "#16351f" : "#351616";
+}
+
+form.addEventListener("submit", async function(e) {
+    e.preventDefault();
+
+    payBtn.disabled = true;
+    payBtn.textContent = "CREATING PAYMENT...";
+
+    try {
+        const formData = new FormData(form);
+
+        const response = await fetch(
+            "/api/team-interest/create-order",
+            {
+                method: "POST",
+                body: formData
+            }
+        );
+
+        const data = await response.json();
+
+        if (!data.ok) {
+            throw new Error(data.error || "Unable to start payment.");
+        }
+
+        const options = {
+            key: data.key_id,
+            amount: data.amount,
+            currency: data.currency,
+            name: "UPL",
+            description: "Team Interest Charge",
+            order_id: data.order_id,
+
+            prefill: {
+                name: form.team_name.value,
+                email: form.email.value,
+                contact: form.phone.value
+            },
+
+            notes: {
+                interest_no: data.interest_no
+            },
+
+            theme: {
+                color: "#111111"
+            },
+
+            handler: async function(payment) {
+
+                showMessage("Verifying payment...");
+
+                const verifyResponse = await fetch(
+                    "/api/team-interest/verify-payment",
+                    {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json"
+                        },
+                        body: JSON.stringify({
+                            interest_no: data.interest_no,
+                            razorpay_order_id: payment.razorpay_order_id,
+                            razorpay_payment_id: payment.razorpay_payment_id,
+                            razorpay_signature: payment.razorpay_signature
+                        })
+                    }
+                );
+
+                const result = await verifyResponse.json();
+
+                if (!result.ok) {
+                    throw new Error(
+                        result.error ||
+                        "Payment verification failed."
+                    );
+                }
+
+                form.reset();
+                payBtn.disabled = false;
+                payBtn.textContent = "PAY ₹100 & SHOW INTEREST";
+
+                showMessage(
+                    "Thank you for showing interest. " +
+                    "Our UPL Organising Committee will contact you soon " +
+                    "if a team slot is available. Interest No: " +
+                    result.interest_no,
+                    true
+                );
+            },
+
+            modal: {
+                ondismiss: function() {
+                    payBtn.disabled = false;
+                    payBtn.textContent = "PAY ₹100 & SHOW INTEREST";
+                }
+            }
+        };
+
+        const rzp = new Razorpay(options);
+
+        rzp.on("payment.failed", function() {
+            payBtn.disabled = false;
+            payBtn.textContent = "PAY ₹100 & SHOW INTEREST";
+            showMessage(
+                "Payment was not completed. Please try again."
+            );
+        });
+
+        rzp.open();
+
+    } catch (error) {
+        payBtn.disabled = false;
+        payBtn.textContent = "PAY ₹100 & SHOW INTEREST";
+        showMessage(error.message);
+    }
+});
+</script>
+
+</body>
+</html>
