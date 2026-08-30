@@ -38,7 +38,7 @@ def create_extra_tables():
     c=None
     try:
         c=db(); c.execute("CREATE TABLE IF NOT EXISTS team_interest (id SERIAL PRIMARY KEY, interest_no TEXT UNIQUE NOT NULL, team_name TEXT NOT NULL, contact_name TEXT NOT NULL, phone TEXT NOT NULL, email TEXT NOT NULL, village TEXT NOT NULL, gram_panchayat TEXT NOT NULL, registration_fee INTEGER DEFAULT 5000, interest_charge INTEGER DEFAULT 100, payment_status TEXT DEFAULT 'Pending', status TEXT DEFAULT 'Interested', razorpay_order_id TEXT, razorpay_payment_id TEXT, paid_amount INTEGER DEFAULT 0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
-        for sql in ["ALTER TABLE team_interest ADD COLUMN IF NOT EXISTS razorpay_order_id TEXT","ALTER TABLE team_interest ADD COLUMN IF NOT EXISTS razorpay_payment_id TEXT","ALTER TABLE team_interest ADD COLUMN IF NOT EXISTS paid_amount INTEGER DEFAULT 0","ALTER TABLE team_interest ADD COLUMN IF NOT EXISTS registration_fee INTEGER DEFAULT 5000","ALTER TABLE team_interest ADD COLUMN IF NOT EXISTS interest_charge INTEGER DEFAULT 100","ALTER TABLE team_interest ADD COLUMN IF NOT EXISTS payment_status TEXT DEFAULT 'Pending'","ALTER TABLE team_interest ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'Pending'","ALTER TABLE team_interest ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP","ALTER TABLE team_interest ADD COLUMN IF NOT EXISTS contact_name TEXT","ALTER TABLE team_interest ADD COLUMN IF NOT EXISTS representative_name TEXT","ALTER TABLE team_interest ADD COLUMN IF NOT EXISTS payment_reference TEXT","ALTER TABLE points_table ADD COLUMN IF NOT EXISTS group_name TEXT DEFAULT 'A'","ALTER TABLE players ADD COLUMN IF NOT EXISTS payment_status TEXT DEFAULT 'Paid'","ALTER TABLE players ADD COLUMN IF NOT EXISTS razorpay_order_id TEXT","ALTER TABLE players ADD COLUMN IF NOT EXISTS razorpay_payment_id TEXT","ALTER TABLE players ADD COLUMN IF NOT EXISTS paid_amount INTEGER DEFAULT 0"]: c.execute(sql)
+        for sql in ["ALTER TABLE team_interest ADD COLUMN IF NOT EXISTS razorpay_order_id TEXT","ALTER TABLE team_interest ADD COLUMN IF NOT EXISTS razorpay_payment_id TEXT","ALTER TABLE team_interest ADD COLUMN IF NOT EXISTS paid_amount INTEGER DEFAULT 0","ALTER TABLE team_interest ADD COLUMN IF NOT EXISTS registration_fee INTEGER DEFAULT 5000","ALTER TABLE team_interest ADD COLUMN IF NOT EXISTS interest_charge INTEGER DEFAULT 100","ALTER TABLE team_interest ADD COLUMN IF NOT EXISTS payment_status TEXT DEFAULT 'Pending'","ALTER TABLE team_interest ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'Pending'","ALTER TABLE team_interest ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP","ALTER TABLE team_interest ADD COLUMN IF NOT EXISTS contact_name TEXT","ALTER TABLE team_interest ADD COLUMN IF NOT EXISTS representative_name TEXT","ALTER TABLE team_interest ADD COLUMN IF NOT EXISTS payment_reference TEXT","ALTER TABLE team_interest ADD COLUMN IF NOT EXISTS payment_screenshot_url TEXT","ALTER TABLE points_table ADD COLUMN IF NOT EXISTS group_name TEXT DEFAULT 'A'","ALTER TABLE players ADD COLUMN IF NOT EXISTS payment_status TEXT DEFAULT 'Paid'","ALTER TABLE players ADD COLUMN IF NOT EXISTS razorpay_order_id TEXT","ALTER TABLE players ADD COLUMN IF NOT EXISTS razorpay_payment_id TEXT","ALTER TABLE players ADD COLUMN IF NOT EXISTS paid_amount INTEGER DEFAULT 0"]: c.execute(sql)
         c.execute("UPDATE team_interest SET contact_name=representative_name WHERE contact_name IS NULL AND representative_name IS NOT NULL")
         c.execute("CREATE TABLE IF NOT EXISTS player_payment (id SERIAL PRIMARY KEY, registration_no TEXT UNIQUE NOT NULL, full_name TEXT NOT NULL, age INTEGER NOT NULL, phone TEXT NOT NULL, email TEXT NOT NULL, village TEXT NOT NULL, gram_panchayat TEXT NOT NULL, primary_role TEXT NOT NULL, batting_style TEXT, bowling_style TEXT, photo_path TEXT, amount INTEGER NOT NULL DEFAULT 100, payment_status TEXT DEFAULT 'Created', razorpay_order_id TEXT UNIQUE, razorpay_payment_id TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"); c.commit()
     except Exception as e:
@@ -75,6 +75,42 @@ def registration(): return render_template('registration.html',player_registrati
 def register(): return jsonify(ok=False,error='Please use the secure payment registration form.'),400
 @app.get('/team-registration')
 def team_registration(): return render_template('team_registration.html',razorpay_key_id=os.environ.get('RAZORPAY_KEY_ID',''))
+
+@app.post('/api/team-interest/manual-submit')
+def team_interest_manual_submit():
+    c=None
+    try:
+        f=request.form
+        team_name=f.get('team_name','').strip()
+        contact_name=f.get('contact_name','').strip()
+        phone=re.sub(r'\D','',f.get('phone',''))
+        email=f.get('email','').strip()
+        village=f.get('village','').strip()
+        panchayat=f.get('panchayat','').strip()
+        image=request.files.get('payment_screenshot')
+        allowed={'.jpg','.jpeg','.png'}
+        if not all([team_name,contact_name,email,village,panchayat]) or len(phone)!=10:
+            return jsonify(ok=False,error='Please complete all required fields with a valid 10-digit phone number.'),400
+        if not image or not image.filename or Path(image.filename).suffix.lower() not in allowed:
+            return jsonify(ok=False,error='Please upload a JPG or PNG payment screenshot.'),400
+        if not os.environ.get('CLOUDINARY_CLOUD_NAME'):
+            return jsonify(ok=False,error='Payment screenshot storage is not configured yet. Please contact the administrator.'),503
+        c=db()
+        interest_no=next_team_interest(c)
+        uploaded=cloudinary.uploader.upload(image,folder='upl/team-payments',resource_type='image')
+        screenshot_url=uploaded.get('secure_url')
+        c.execute('INSERT INTO team_interest(interest_no,team_name,contact_name,phone,email,village,gram_panchayat,registration_fee,interest_charge,payment_status,status,paid_amount,payment_screenshot_url) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',(interest_no,team_name,contact_name,phone,email,village,panchayat,5000,100,'Submitted','Interested',100,screenshot_url))
+        c.commit()
+        return jsonify(ok=True,interest_no=interest_no)
+    except Exception as e:
+        print('TEAM MANUAL SUBMIT ERROR:',repr(e))
+        if c:
+            c.rollback()
+        return jsonify(ok=False,error='Unable to submit registration right now. Please try again.'),500
+    finally:
+        if c:
+            c.close()
+
 @app.get('/teams')
 def teams():
     c=db()
