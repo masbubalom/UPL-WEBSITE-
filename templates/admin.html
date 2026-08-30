@@ -1,12 +1,14 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>UPL Admin Dashboard</title>
 <link rel="stylesheet" href="/static/style.css">
+<style>
+.admin-section{margin:28px 0}.table-wrap{overflow-x:auto}.table{min-width:900px}.status-badge{display:inline-block;padding:5px 9px;border-radius:999px;font-size:12px;font-weight:700}.status-paid{background:#16351f;color:#8ee6a2}.status-created{background:#332b16;color:#ffd98a}.status-approved{background:#16351f;color:#8ee6a2}.status-rejected{background:#351616;color:#ff8791}.status-contacted{background:#172b3b;color:#8fc7ff}.action-row{display:flex;gap:6px;flex-wrap:wrap}.muted-small{font-size:12px;color:#888}.nowrap{white-space:nowrap}
+</style>
 </head>
-
 <body>
 
 <div class="nav">
@@ -17,992 +19,137 @@
 <main class="wrap admin">
 
 <div class="banner">
-    <h2>Registration Management</h2>
-    <p class="muted">
-        Review player registrations and manage the tournament website.
-    </p>
+    <h2>UPL Admin Dashboard</h2>
+    <p class="muted">Manage player registrations, team applications and tournament content.</p>
 </div>
-
 
 <!-- ================= PLAYERS ================= -->
-
 <section class="admin-section">
-
-<div class="section-head">
-<div>
-<h2>Players</h2>
-<p>Approve or reject registrations.</p>
-</div>
-</div>
-
-<div class="card" style="overflow:auto">
-
+<div class="section-head"><div><h2>Player Registrations</h2><p>Review, approve or reject player registrations.</p></div></div>
+<div class="card table-wrap">
 <table class="table">
-
-<tr>
-<th>Photo</th>
-<th>Reg</th>
-<th>Name</th>
-<th>Age</th>
-<th>Phone</th>
-<th>Email</th>
-<th>Village</th>
-<th>Panchayat</th>
-<th>Role</th>
-<th>Batting</th>
-<th>Bowling</th>
-<th>Status</th>
-<th>Action</th>
-</tr>
-
-
+<tr><th>Photo</th><th>Reg</th><th>Name</th><th>Age</th><th>Phone</th><th>Email</th><th>Village</th><th>Panchayat</th><th>Role</th><th>Batting</th><th>Bowling</th><th>Status</th><th>Action</th></tr>
 {% for p in players %}
-
 <tr>
-
-
-<!-- PLAYER PHOTO -->
-
-<td>
-
-{% if p['photo_path'] %}
-
-    {% if p['photo_path'].startswith('http') %}
-
-        <!-- Cloudinary photo -->
-
-        <img
-            src="{{ p['photo_path'] }}"
-            alt="{{ p['full_name'] }}"
-            loading="lazy"
-            style="
-                width:45px;
-                height:45px;
-                object-fit:cover;
-                border-radius:5px;
-                display:block;
-            "
-        >
-
-    {% else %}
-
-        <!-- Old/local photo -->
-
-        <img
-            src="/uploads/{{ p['photo_path'] }}"
-            alt="{{ p['full_name'] }}"
-            loading="lazy"
-            style="
-                width:45px;
-                height:45px;
-                object-fit:cover;
-                border-radius:5px;
-                display:block;
-            "
-        >
-
-    {% endif %}
-
-{% else %}
-
-    <div
-        style="
-            width:45px;
-            height:45px;
-            border-radius:5px;
-            background:#222;
-            display:flex;
-            align-items:center;
-            justify-content:center;
-            font-size:20px;
-        "
-    >
-        👤
-    </div>
-
-{% endif %}
-
-</td>
-
-
-<td>
-{{ p['registration_no'] }}
-</td>
-
-
-<td>
-{{ p['full_name'] }}
-</td>
-
-
-<td>
-{{ p['age'] }}
-</td>
-
-
-<td>
-{{ p['phone'] }}
-</td>
-
-
-<td>
-{{ p['email'] }}
-</td>
-
-
-<td>
-{{ p['village'] }}
-</td>
-
-
-<td>
-{{ p['gram_panchayat'] }}
-</td>
-
-
-<td>
-{{ p['primary_role'] }}
-</td>
-
-
-<td>
-{{ p['batting_style'] or '-' }}
-</td>
-
-
-<td>
-{{ p['bowling_style'] or '-' }}
-</td>
-
-
-<td class="status {{ p['status'] }}">
-{{ p['status'] }}
-</td>
-
-
-<!-- APPROVE / REJECT -->
-
-<td>
-
-<form
-    method="post"
-    action="/admin/player/{{ p['id'] }}/Approved"
-    style="display:inline"
->
-
-<button
-    class="btn small"
-    type="submit"
->
-APPROVE
-</button>
-
-</form>
-
-
-<form
-    method="post"
-    action="/admin/player/{{ p['id'] }}/Rejected"
-    style="display:inline"
->
-
-<button
-    class="btn small danger"
-    type="submit"
->
-REJECT
-</button>
-
-</form>
-
-</td>
-
-
+<td>{% if p['photo_path'] %}<img src="{{ p['photo_path'] if p['photo_path'].startswith('http') else '/uploads/' ~ p['photo_path'] }}" alt="{{ p['full_name'] }}" loading="lazy" style="width:45px;height:45px;object-fit:cover;border-radius:5px">{% else %}👤{% endif %}</td>
+<td class="nowrap">{{ p['registration_no'] }}</td><td>{{ p['full_name'] }}</td><td>{{ p['age'] }}</td><td>{{ p['phone'] }}</td><td>{{ p['email'] }}</td><td>{{ p['village'] }}</td><td>{{ p['gram_panchayat'] }}</td><td>{{ p['primary_role'] }}</td><td>{{ p['batting_style'] or '-' }}</td><td>{{ p['bowling_style'] or '-' }}</td>
+<td><span class="status-badge">{{ p['status'] }}</span></td>
+<td class="nowrap"><form method="post" action="/admin/player/{{ p['id'] }}/Approved" style="display:inline"><button class="btn small" type="submit">APPROVE</button></form> <form method="post" action="/admin/player/{{ p['id'] }}/Rejected" style="display:inline"><button class="btn small danger" type="submit">REJECT</button></form></td>
 </tr>
-
-
-{% else %}
-
-<tr>
-
-<td colspan="13">
-No registrations yet.
-</td>
-
-</tr>
-
-{% endfor %}
-
+{% else %}<tr><td colspan="13">No player registrations yet.</td></tr>{% endfor %}
 </table>
-
 </div>
-
 </section>
 
-
+<!-- ================= TEAM REGISTRATIONS ================= -->
+<section class="admin-section">
+<div class="section-head"><div><h2>Team Registrations</h2><p>Every successfully paid ₹100 team interest application appears here.</p></div></div>
+<div class="card table-wrap">
+<table class="table">
+<tr>
+<th>Interest No.</th><th>Team Name</th><th>Representative</th><th>Phone</th><th>Email</th><th>Village</th><th>Panchayat</th><th>₹100 Charge</th><th>₹5,000 Fee</th><th>Payment</th><th>Razorpay Order</th><th>Payment ID</th><th>Paid</th><th>Status</th><th>Created</th><th>Action</th>
+</tr>
+{% for t in team_interest %}
+<tr>
+<td class="nowrap"><b>{{ t['interest_no'] }}</b></td>
+<td>{{ t['team_name'] }}</td>
+<td>{{ t['contact_name'] or t['representative_name'] or '-' }}</td>
+<td>{{ t['phone'] }}</td>
+<td>{{ t['email'] }}</td>
+<td>{{ t['village'] }}</td>
+<td>{{ t['gram_panchayat'] }}</td>
+<td>₹{{ t['interest_charge'] or 100 }}</td>
+<td>₹{{ t['registration_fee'] or 5000 }}</td>
+<td><span class="status-badge {% if t['payment_status'] == 'Paid' %}status-paid{% elif t['payment_status'] == 'Created' %}status-created{% endif %}">{{ t['payment_status'] or 'Pending' }}</span></td>
+<td class="muted-small">{{ t['razorpay_order_id'] or '-' }}</td>
+<td class="muted-small">{{ t['razorpay_payment_id'] or '-' }}</td>
+<td>₹{{ t['paid_amount'] or 0 }}</td>
+<td><span class="status-badge {% if t['status'] == 'Approved' %}status-approved{% elif t['status'] == 'Rejected' %}status-rejected{% elif t['status'] == 'Contacted' %}status-contacted{% endif %}">{{ t['status'] or 'Interested' }}</span></td>
+<td class="nowrap">{{ t['created_at'] }}</td>
+<td>
+<div class="action-row">
+<form method="post" action="/admin/team-interest/{{ t['id'] }}/Contacted"><button class="btn small" type="submit">CONTACTED</button></form>
+<form method="post" action="/admin/team-interest/{{ t['id'] }}/Approved"><button class="btn small" type="submit">APPROVE</button></form>
+<form method="post" action="/admin/team-interest/{{ t['id'] }}/Rejected"><button class="btn small danger" type="submit">REJECT</button></form>
+</div>
+</td>
+</tr>
+{% else %}<tr><td colspan="16">No team registrations yet.</td></tr>{% endfor %}
+</table>
+</div>
+</section>
 
 <!-- ================= TEAMS ================= -->
-
 <section class="admin-section">
-
-<div class="section-head">
-
-<div>
-
-<h2>Teams</h2>
-
-<p>
-Add team names as they become final.
-</p>
-
-</div>
-
-</div>
-
-
+<div class="section-head"><div><h2>Teams</h2><p>Add or remove confirmed tournament teams.</p></div></div>
 <div class="card">
-
-
-<form
-    class="grid"
-    method="post"
-    action="/admin/team/add"
->
-
-
-<div>
-
-<label>
-Team Name
-</label>
-
-<input
-    name="name"
-    required
->
-
-</div>
-
-
-<div>
-
-<label>
-Description
-</label>
-
-<input
-    name="description"
->
-
-</div>
-
-
-<div class="full">
-
-<button
-    class="btn"
-    type="submit"
->
-ADD TEAM
-</button>
-
-</div>
-
-
+<form class="grid" method="post" action="/admin/team/add">
+<div><label>Team Name</label><input name="name" required></div>
+<div><label>Description</label><input name="description"></div>
+<div class="full"><button class="btn" type="submit">ADD TEAM</button></div>
 </form>
-
-
-<hr
-style="
-border-color:#292a31;
-margin:20px 0;
-">
-
-
+<hr style="border-color:#292a31;margin:20px 0">
 {% for t in teams %}
-
-
-<div
-    style="
-        display:inline-block;
-        margin:4px;
-        padding:10px;
-    "
-    class="card"
->
-
-
-{{ t['name'] }}
-
-
-<form
-    method="post"
-    action="/admin/team/delete/{{ t['id'] }}"
-    style="display:inline"
->
-
-
-<button
-    class="btn small danger"
-    type="submit"
->
-DELETE
-</button>
-
-
-</form>
-
-
+<div class="card" style="display:inline-block;margin:4px;padding:10px">{{ t['name'] }} <form method="post" action="/admin/team/delete/{{ t['id'] }}" style="display:inline"><button class="btn small danger" type="submit">DELETE</button></form></div>
+{% else %}<p class="muted">No teams added.</p>{% endfor %}
 </div>
-
-
-{% else %}
-
-
-<p class="muted">
-No teams added.
-</p>
-
-
-{% endfor %}
-
-
-</div>
-
 </section>
-
-
 
 <!-- ================= FIXTURES ================= -->
-
 <section class="admin-section">
-
-<div class="section-head">
-
-<div>
-
-<h2>Fixtures</h2>
-
-<p>
-Schedule matches for October and November.
-</p>
-
-</div>
-
-</div>
-
-
+<div class="section-head"><div><h2>Fixtures</h2><p>Add and manage match schedules.</p></div></div>
 <div class="card">
-
-
-<form
-    class="grid"
-    method="post"
-    action="/admin/fixture/add"
->
-
-
-<div>
-
-<label>
-Match No.
-</label>
-
-<input
-    name="match_no"
-    type="number"
->
-
-</div>
-
-
-<div>
-
-<label>
-Date
-</label>
-
-<input
-    name="date"
-    type="date"
->
-
-</div>
-
-
-<div>
-
-<label>
-Time
-</label>
-
-<input
-    name="time"
-    type="time"
->
-
-</div>
-
-
-<div>
-
-<label>
-Venue
-</label>
-
-<input
-    name="venue"
-    value="Uttar Lakshmipur High School"
->
-
-</div>
-
-
-<div>
-
-<label>
-Team 1
-</label>
-
-<input
-    name="team1"
->
-
-</div>
-
-
-<div>
-
-<label>
-Team 2
-</label>
-
-<input
-    name="team2"
->
-
-</div>
-
-
-<div>
-
-<label>
-Status
-</label>
-
-<select name="status">
-
-<option>
-Upcoming
-</option>
-
-<option>
-Completed
-</option>
-
-<option>
-Live
-</option>
-
-</select>
-
-</div>
-
-
-<div>
-
-<label>
-Result
-</label>
-
-<input
-    name="result"
->
-
-</div>
-
-
-<div class="full">
-
-<button
-    class="btn"
-    type="submit"
->
-ADD FIXTURE
-</button>
-
-</div>
-
-
+<form class="grid" method="post" action="/admin/fixture/add">
+<div><label>Match No.</label><input name="match_no" type="number"></div>
+<div><label>Date</label><input name="date" type="date"></div>
+<div><label>Time</label><input name="time" type="time"></div>
+<div><label>Venue</label><input name="venue" value="Uttar Lakshmipur High School"></div>
+<div><label>Team 1</label><input name="team1"></div>
+<div><label>Team 2</label><input name="team2"></div>
+<div><label>Status</label><select name="status"><option>Upcoming</option><option>Live</option><option>Completed</option></select></div>
+<div><label>Result</label><input name="result"></div>
+<div class="full"><button class="btn" type="submit">ADD FIXTURE</button></div>
 </form>
-
-
-<hr
-style="
-border-color:#292a31;
-margin:20px 0;
-">
-
-
-<table class="table">
-
-<tr>
-
-<th>#</th>
-<th>Teams</th>
-<th>Date</th>
-<th>Status</th>
-<th>Action</th>
-
-</tr>
-
-
-{% for f in fixtures %}
-
-
-<tr>
-
-<td>
-{{ f['match_no'] }}
-</td>
-
-
-<td>
-{{ f['team1'] }} vs {{ f['team2'] }}
-</td>
-
-
-<td>
-{{ f['match_date'] }}
-</td>
-
-
-<td>
-{{ f['status'] }}
-</td>
-
-
-<td>
-
-
-<form
-    method="post"
-    action="/admin/fixture/delete/{{ f['id'] }}"
->
-
-
-<button
-    class="btn small danger"
-    type="submit"
->
-DELETE
-</button>
-
-
-</form>
-
-
-</td>
-
-
-</tr>
-
-
-{% else %}
-
-
-<tr>
-
-<td colspan="5">
-No fixtures added.
-</td>
-
-</tr>
-
-
-{% endfor %}
-
-
-</table>
-
-
+<hr style="border-color:#292a31;margin:20px 0">
+<div class="table-wrap"><table class="table"><tr><th>#</th><th>Teams</th><th>Date</th><th>Time</th><th>Venue</th><th>Status</th><th>Result</th><th>Action</th></tr>
+{% for f in fixtures %}<tr><td>{{ f['match_no'] }}</td><td>{{ f['team1'] }} vs {{ f['team2'] }}</td><td>{{ f['match_date'] }}</td><td>{{ f['match_time'] }}</td><td>{{ f['venue'] }}</td><td>{{ f['status'] }}</td><td>{{ f['result_text'] }}</td><td><form method="post" action="/admin/fixture/delete/{{ f['id'] }}"><button class="btn small danger" type="submit">DELETE</button></form></td></tr>{% else %}<tr><td colspan="8">No fixtures added.</td></tr>{% endfor %}
+</table></div>
 </div>
-
 </section>
-
-
 
 <!-- ================= POINTS TABLE ================= -->
-
 <section class="admin-section">
-
-<div class="section-head">
-
-<div>
-
-<h2>
-Points Table
-</h2>
-
-<p>
-Enter/update standings manually.
-</p>
-
-</div>
-
-</div>
-
-
+<div class="section-head"><div><h2>Points Table</h2><p>Add or update standings. Existing endpoint performs an upsert by team name.</p></div></div>
 <div class="card">
-
-
-<form
-    class="grid"
-    method="post"
-    action="/admin/points/add"
->
-
-
-<div>
-
-<label>
-Team
-</label>
-
-<input
-    name="team_name"
-    required
->
-
-</div>
-
-
-<div>
-
-<label>
-Played
-</label>
-
-<input
-    name="played"
-    type="number"
-    min="0"
-    value="0"
->
-
-</div>
-
-
-<div>
-
-<label>
-Won
-</label>
-
-<input
-    name="won"
-    type="number"
-    min="0"
-    value="0"
->
-
-</div>
-
-
-<div>
-
-<label>
-Lost
-</label>
-
-<input
-    name="lost"
-    type="number"
-    min="0"
-    value="0"
->
-
-</div>
-
-
-<div>
-
-<label>
-Tied
-</label>
-
-<input
-    name="tied"
-    type="number"
-    min="0"
-    value="0"
->
-
-</div>
-
-
-<div>
-
-<label>
-Points
-</label>
-
-<input
-    name="points"
-    type="number"
-    min="0"
-    value="0"
->
-
-</div>
-
-
-<div>
-
-<label>
-NRR
-</label>
-
-<input
-    name="nrr"
-    type="number"
-    step="0.001"
-    value="0"
->
-
-</div>
-
-
-<div class="full">
-
-<button
-    class="btn"
-    type="submit"
->
-SAVE STANDING
-</button>
-
-</div>
-
-
+<form class="grid" method="post" action="/admin/points/add">
+<div><label>Team</label><input name="team_name" required></div><div><label>Played</label><input name="played" type="number" min="0" value="0"></div><div><label>Won</label><input name="won" type="number" min="0" value="0"></div><div><label>Lost</label><input name="lost" type="number" min="0" value="0"></div><div><label>Tied</label><input name="tied" type="number" min="0" value="0"></div><div><label>Points</label><input name="points" type="number" min="0" value="0"></div><div><label>NRR</label><input name="nrr" type="number" step="0.001" value="0"></div><div class="full"><button class="btn" type="submit">SAVE / UPDATE STANDING</button></div>
 </form>
-
-
+<div class="table-wrap" style="margin-top:20px"><table class="table"><tr><th>Team</th><th>P</th><th>W</th><th>L</th><th>T</th><th>PTS</th><th>NRR</th><th>Delete</th></tr>
+{% for p in points %}<tr><td>{{ p['team_name'] }}</td><td>{{ p['played'] }}</td><td>{{ p['won'] }}</td><td>{{ p['lost'] }}</td><td>{{ p['tied'] }}</td><td>{{ p['points'] }}</td><td>{{ '%.3f'|format(p['nrr'] or 0) }}</td><td><form method="post" action="/admin/points/delete/{{ p['id'] }}"><button class="btn small danger" type="submit">DELETE</button></form></td></tr>{% else %}<tr><td colspan="8">No standings added.</td></tr>{% endfor %}
+</table></div>
 </div>
-
 </section>
-
-
 
 <!-- ================= NEWS ================= -->
-
 <section class="admin-section">
-
-<div class="section-head">
-
-<div>
-
-<h2>
-News / Announcements
-</h2>
-
-<p>
-Publish tournament updates.
-</p>
-
-</div>
-
-</div>
-
-
+<div class="section-head"><div><h2>News / Announcements</h2><p>Publish official tournament updates.</p></div></div>
 <div class="card">
-
-
-<form
-    method="post"
-    action="/admin/news/add"
->
-
-
-<p>
-
-<label>
-Title
-</label>
-
-<input
-    name="title"
-    required
->
-
-</p>
-
-
-<p>
-
-<label>
-Announcement
-</label>
-
-<textarea
-    name="body"
-    required
-></textarea>
-
-</p>
-
-
-<button
-    class="btn"
-    type="submit"
->
-PUBLISH
-</button>
-
-
-</form>
-
-
-<hr
-style="
-border-color:#292a31;
-margin:20px 0;
-">
-
-
-{% for n in news %}
-
-
-<div
-    class="card"
-    style="margin:8px 0"
->
-
-
-<b>
-{{ n['title'] }}
-</b>
-
-
-<p class="muted">
-{{ n['body'] }}
-</p>
-
-
-<form
-    method="post"
-    action="/admin/news/delete/{{ n['id'] }}"
->
-
-
-<button
-    class="btn small danger"
-    type="submit"
->
-DELETE
-</button>
-
-
-</form>
-
-
+<form method="post" action="/admin/news/add"><p><label>Title</label><input name="title" required></p><p><label>Announcement</label><textarea name="body" required></textarea></p><button class="btn" type="submit">PUBLISH</button></form>
+<hr style="border-color:#292a31;margin:20px 0">
+{% for n in news %}<div class="card" style="margin:8px 0"><b>{{ n['title'] }}</b><p class="muted">{{ n['body'] }}</p><form method="post" action="/admin/news/delete/{{ n['id'] }}"><button class="btn small danger" type="submit">DELETE</button></form></div>{% else %}<p class="muted">No announcements yet.</p>{% endfor %}
 </div>
-
-
-{% else %}
-
-
-<p class="muted">
-No announcements yet.
-</p>
-
-
-{% endfor %}
-
-
-</div>
-
 </section>
-
-
 
 <!-- ================= GALLERY ================= -->
-
 <section class="admin-section">
-
-<div class="section-head">
-
-<div>
-
-<h2>
-Gallery
-</h2>
-
-<p>
-Upload official UPL photos.
-</p>
-
-</div>
-
-</div>
-
-
+<div class="section-head"><div><h2>Gallery</h2><p>Upload official UPL photos.</p></div></div>
 <div class="card">
-
-
-<form
-    method="post"
-    action="/admin/gallery/add"
-    enctype="multipart/form-data"
->
-
-
-<p>
-
-<label>
-Title
-</label>
-
-<input
-    name="title"
->
-
-</p>
-
-
-<p>
-
-<label>
-Image
-</label>
-
-<input
-    name="image"
-    type="file"
-    accept=".jpg,.jpeg,.png,.webp"
-    required
->
-
-</p>
-
-
-<button
-    class="btn"
-    type="submit"
->
-UPLOAD PHOTO
-</button>
-
-
-</form>
-
-
+<form method="post" action="/admin/gallery/add" enctype="multipart/form-data"><p><label>Title</label><input name="title"></p><p><label>Image</label><input name="image" type="file" accept=".jpg,.jpeg,.png,.webp" required></p><button class="btn" type="submit">UPLOAD PHOTO</button></form>
+<hr style="border-color:#292a31;margin:20px 0">
+{% for g in gallery %}<div class="card" style="display:inline-block;margin:6px;vertical-align:top;width:180px"><img src="{{ g['image_path'] }}" alt="{{ g['title'] or 'UPL Gallery' }}" style="width:100%;height:120px;object-fit:cover;border-radius:6px"><p>{{ g['title'] or 'UPL Photo' }}</p><form method="post" action="/admin/gallery/delete/{{ g['id'] }}"><button class="btn small danger" type="submit">DELETE</button></form></div>{% else %}<p class="muted">No gallery photos yet.</p>{% endfor %}
 </div>
-
 </section>
 
-
 </main>
-
 </body>
 </html>
