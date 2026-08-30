@@ -1,8 +1,8 @@
 name: Fix News Gallery Management
 on:
   push:
-    paths-ignore:
-      - '.github/workflows/fix-news-gallery.yml'
+    paths:
+      - '.github/upl-fix-trigger'
 permissions:
   contents: write
 jobs:
@@ -10,31 +10,74 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Patch Flask routes and admin UI
+      - name: Patch app routes
         run: |
           python - <<'PY'
           from pathlib import Path
-          app=Path('app.py').read_text()
+          p=Path('app.py')
+          s=p.read_text()
           marker="@app.post('/admin/news/add')"
-          routes="""@app.post('/admin/news/<int:id>/edit')\n@admin_required\ndef news_edit(id):\n    title=request.form.get('title','').strip(); body=request.form.get('body','').strip()\n    c=db()\n    try:\n        if title and body:\n            c.execute('UPDATE news SET title=?, body=? WHERE id=?',(title,body,id)); c.commit()\n    finally: c.close()\n    return redirect('/admin')\n\n@app.post('/admin/gallery/<int:id>/edit')\n@admin_required\ndef gallery_edit(id):\n    title=request.form.get('title','').strip(); image=request.files.get('image'); c=None\n    try:\n        if image and image.filename:\n            if Path(image.filename).suffix.lower() not in {'.jpg','.jpeg','.png','.webp'}:\n                return redirect('/admin')\n            if not os.environ.get('CLOUDINARY_CLOUD_NAME'):\n                return redirect('/admin')\n            r=cloudinary.uploader.upload(image,folder='upl/gallery',resource_type='image')\n            c=db(); c.execute('UPDATE gallery SET title=?, image_path=? WHERE id=?',(title,r['secure_url'],id))\n        else:\n            c=db(); c.execute('UPDATE gallery SET title=? WHERE id=?',(title,id))\n        c.commit()\n    except Exception as e:\n        print('GALLERY EDIT ERROR:',repr(e))\n        if c: c.rollback()\n    finally:\n        if c: c.close()\n    return redirect('/admin')\n\n"""
-          if "def news_edit(id):" not in app:
-              app=app.replace(marker,routes+marker,1)
-              Path('app.py').write_text(app)
+          routes="""@app.post('/admin/news/<int:id>/edit')
+          @admin_required
+          def news_edit(id):
+              title=request.form.get('title','').strip()
+              body=request.form.get('body','').strip()
+              c=db()
+              try:
+                  if title and body:
+                      c.execute('UPDATE news SET title=?, body=? WHERE id=?',(title,body,id)); c.commit()
+              finally:
+                  c.close()
+              return redirect('/admin')
 
-          admin=Path('templates/admin.html').read_text()
-          old_news="""{% for n in news %}<div class=\"card\" style=\"margin:8px 0\"><b>{{ n['title'] }}</b><p class=\"muted\">{{ n['body'] }}</p><form method=\"post\" action=\"/admin/news/delete/{{ n['id'] }}\"><button class=\"btn small danger\" type=\"submit\">DELETE</button></form></div>{% else %}<p class=\"muted\">No announcements yet.</p>{% endfor %}"""
-          new_news="""{% for n in news %}<div class=\"card\" style=\"margin:8px 0\"><b>{{ n['title'] }}</b><p class=\"muted\">{{ n['body'] }}</p><div class=\"registration-actions\"><button class=\"btn small\" type=\"button\" onclick=\"toggleEdit('news-{{ n['id'] }}')\">EDIT</button><form method=\"post\" action=\"/admin/news/delete/{{ n['id'] }}\" onsubmit=\"return confirm('Delete this news item?')\"><button class=\"btn small danger\" type=\"submit\">DELETE</button></form></div><form id=\"edit-news-{{ n['id'] }}\" class=\"edit-box hidden\" method=\"post\" action=\"/admin/news/{{ n['id'] }}/edit\"><p><label>Title</label><input name=\"title\" value=\"{{ n['title'] }}\" required></p><p><label>Announcement</label><textarea name=\"body\" required>{{ n['body'] }}</textarea></p><button class=\"btn small\" type=\"submit\">SAVE CHANGES</button> <button class=\"btn small\" type=\"button\" onclick=\"toggleEdit('news-{{ n['id'] }}')\">CANCEL</button></form></div>{% else %}<p class=\"muted\">No announcements yet.</p>{% endfor %}"""
-          if old_news in admin: admin=admin.replace(old_news,new_news,1)
+          @app.post('/admin/gallery/<int:id>/edit')
+          @admin_required
+          def gallery_edit(id):
+              title=request.form.get('title','').strip()
+              image=request.files.get('image')
+              c=None
+              try:
+                  if image and image.filename:
+                      if Path(image.filename).suffix.lower() not in {'.jpg','.jpeg','.png','.webp'}:
+                          return redirect('/admin')
+                      if not os.environ.get('CLOUDINARY_CLOUD_NAME'):
+                          return redirect('/admin')
+                      r=cloudinary.uploader.upload(image,folder='upl/gallery',resource_type='image')
+                      c=db(); c.execute('UPDATE gallery SET title=?, image_path=? WHERE id=?',(title,r['secure_url'],id))
+                  else:
+                      c=db(); c.execute('UPDATE gallery SET title=? WHERE id=?',(title,id))
+                  c.commit()
+              except Exception as e:
+                  print('GALLERY EDIT ERROR:',repr(e))
+                  if c: c.rollback()
+              finally:
+                  if c: c.close()
+              return redirect('/admin')
 
-          old_gallery="""{% for g in gallery %}<div class=\"card\" style=\"display:inline-block;margin:6px;vertical-align:top;width:180px\"><img src=\"{{ g['image_path'] }}\" alt=\"{{ g['title'] or 'UPL Gallery' }}\" style=\"width:100%;height:120px;object-fit:cover;border-radius:6px\"><p>{{ g['title'] or 'UPL Photo' }}</p><form method=\"post\" action=\"/admin/gallery/delete/{{ g['id'] }}\"><button class=\"btn small danger\" type=\"submit\">DELETE</button></form></div>{% else %}<p class=\"muted\">No gallery photos yet.</p>{% endfor %}"""
-          new_gallery="""{% for g in gallery %}<div class=\"card\" style=\"display:inline-block;margin:6px;vertical-align:top;width:220px\"><img src=\"{{ g['image_path'] if g['image_path'].startswith('http') else '/uploads/' ~ g['image_path'] }}\" alt=\"{{ g['title'] or 'UPL Gallery' }}\" style=\"width:100%;height:145px;object-fit:cover;border-radius:6px\"><p>{{ g['title'] or 'UPL Photo' }}</p><div class=\"registration-actions\"><button class=\"btn small\" type=\"button\" onclick=\"toggleEdit('gallery-{{ g['id'] }}')\">EDIT</button><form method=\"post\" action=\"/admin/gallery/delete/{{ g['id'] }}\" onsubmit=\"return confirm('Delete this gallery photo?')\"><button class=\"btn small danger\" type=\"submit\">DELETE</button></form></div><form id=\"edit-gallery-{{ g['id'] }}\" class=\"edit-box hidden\" method=\"post\" action=\"/admin/gallery/{{ g['id'] }}/edit\" enctype=\"multipart/form-data\"><p><label>Title</label><input name=\"title\" value=\"{{ g['title'] or '' }}\"></p><p><label>Replace Image (optional)</label><input name=\"image\" type=\"file\" accept=\".jpg,.jpeg,.png,.webp\"></p><button class=\"btn small\" type=\"submit\">SAVE CHANGES</button> <button class=\"btn small\" type=\"button\" onclick=\"toggleEdit('gallery-{{ g['id'] }}')\">CANCEL</button></form></div>{% else %}<p class=\"muted\">No gallery photos yet.</p>{% endfor %}"""
-          if old_gallery in admin: admin=admin.replace(old_gallery,new_gallery,1)
-          Path('templates/admin.html').write_text(admin)
+          """
+          if "def news_edit(id):" not in s:
+              s=s.replace(marker,routes+marker,1)
+              p.write_text(s)
           PY
-      - name: Commit patch
+      - name: Patch admin template
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('templates/admin.html')
+          s=p.read_text()
+          old="""{% for n in news %}<div class=\"card\" style=\"margin:8px 0\"><b>{{ n['title'] }}</b><p class=\"muted\">{{ n['body'] }}</p><form method=\"post\" action=\"/admin/news/delete/{{ n['id'] }}\"><button class=\"btn small danger\" type=\"submit\">DELETE</button></form></div>{% else %}<p class=\"muted\">No announcements yet.</p>{% endfor %}"""
+          new="""{% for n in news %}<div class=\"card\" style=\"margin:8px 0\"><b>{{ n['title'] }}</b><p class=\"muted\">{{ n['body'] }}</p><div class=\"registration-actions\"><button class=\"btn small\" type=\"button\" onclick=\"toggleEdit('news-{{ n['id'] }}')\">EDIT</button><form method=\"post\" action=\"/admin/news/delete/{{ n['id'] }}\" onsubmit=\"return confirm('Delete this news item?')\"><button class=\"btn small danger\" type=\"submit\">DELETE</button></form></div><form id=\"edit-news-{{ n['id'] }}\" class=\"edit-box hidden\" method=\"post\" action=\"/admin/news/{{ n['id'] }}/edit\"><p><label>Title</label><input name=\"title\" value=\"{{ n['title'] }}\" required></p><p><label>Announcement</label><textarea name=\"body\" required>{{ n['body'] }}</textarea></p><button class=\"btn small\" type=\"submit\">SAVE CHANGES</button> <button class=\"btn small\" type=\"button\" onclick=\"toggleEdit('news-{{ n['id'] }}')\">CANCEL</button></form></div>{% else %}<p class=\"muted\">No announcements yet.</p>{% endfor %}"""
+          if old in s: s=s.replace(old,new,1)
+          oldg="""{% for g in gallery %}<div class=\"card\" style=\"display:inline-block;margin:6px;vertical-align:top;width:180px\"><img src=\"{{ g['image_path'] }}\" alt=\"{{ g['title'] or 'UPL Gallery' }}\" style=\"width:100%;height:120px;object-fit:cover;border-radius:6px\"><p>{{ g['title'] or 'UPL Photo' }}</p><form method=\"post\" action=\"/admin/gallery/delete/{{ g['id'] }}\"><button class=\"btn small danger\" type=\"submit\">DELETE</button></form></div>{% else %}<p class=\"muted\">No gallery photos yet.</p>{% endfor %}"""
+          newg="""{% for g in gallery %}<div class=\"card\" style=\"display:inline-block;margin:6px;vertical-align:top;width:220px\"><img src=\"{{ g['image_path'] if g['image_path'].startswith('http') else '/uploads/' ~ g['image_path'] }}\" alt=\"{{ g['title'] or 'UPL Gallery' }}\" style=\"width:100%;height:145px;object-fit:cover;border-radius:6px\"><p>{{ g['title'] or 'UPL Photo' }}</p><div class=\"registration-actions\"><button class=\"btn small\" type=\"button\" onclick=\"toggleEdit('gallery-{{ g['id'] }}')\">EDIT</button><form method=\"post\" action=\"/admin/gallery/delete/{{ g['id'] }}\" onsubmit=\"return confirm('Delete this gallery photo?')\"><button class=\"btn small danger\" type=\"submit\">DELETE</button></form></div><form id=\"edit-gallery-{{ g['id'] }}\" class=\"edit-box hidden\" method=\"post\" action=\"/admin/gallery/{{ g['id'] }}/edit\" enctype=\"multipart/form-data\"><p><label>Title</label><input name=\"title\" value=\"{{ g['title'] or '' }}\"></p><p><label>Replace Image (optional)</label><input name=\"image\" type=\"file\" accept=\".jpg,.jpeg,.png,.webp\"></p><button class=\"btn small\" type=\"submit\">SAVE CHANGES</button> <button class=\"btn small\" type=\"button\" onclick=\"toggleEdit('gallery-{{ g['id'] }}')\">CANCEL</button></form></div>{% else %}<p class=\"muted\">No gallery photos yet.</p>{% endfor %}"""
+          if oldg in s: s=s.replace(oldg,newg,1)
+          p.write_text(s)
+          PY
+      - name: Validate Python
+        run: python -m py_compile app.py
+      - name: Commit fixes
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add app.py templates/admin.html
-          git diff --cached --quiet || git commit -m 'Add edit and delete for news and gallery'
-          git push
+          if ! git diff --cached --quiet; then git commit -m 'Fix news and gallery edit controls'; git push; fi
