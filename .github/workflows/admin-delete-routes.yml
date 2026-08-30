@@ -1,4 +1,4 @@
-name: Add admin delete routes
+name: Add admin delete controls
 
 on:
   push:
@@ -15,7 +15,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Add delete routes if missing
+      - name: Patch admin delete routes and controls
         shell: python
         run: |
           from pathlib import Path
@@ -27,6 +27,10 @@ jobs:
           if "def player_delete(id):" not in s:
               s = s.replace(marker, routes + marker, 1)
               changed = True
+          hook = '''\n@app.after_request\ndef add_admin_delete_controls(response):\n    if request.path == '/admin' and response.content_type.startswith('text/html'):\n        script = """<style>.admin-delete-btn{margin-left:6px!important;background:#5b1720!important;color:#fff!important;border:1px solid #8b2330!important}</style><script>document.addEventListener('DOMContentLoaded',function(){function addDelete(section,endpoint,confirmText){var box=document.getElementById(section);if(!box)return;box.querySelectorAll('table tbody tr').forEach(function(row){var cells=row.querySelectorAll('td');if(!cells.length)return;var idMatch=row.innerHTML.match(/(?:player|team-interest)\\/(\\d+)/);if(!idMatch)return;var id=idMatch[1];var cell=cells[cells.length-1];if(cell.querySelector('.admin-delete-btn'))return;var form=document.createElement('form');form.method='post';form.action=endpoint.replace('__ID__',id);form.style.display='inline';var b=document.createElement('button');b.type='submit';b.className='btn small danger admin-delete-btn';b.textContent='DELETE';b.onclick=function(){return confirm(confirmText)};form.appendChild(b);cell.appendChild(form);});}addDelete('players','/admin/player/__ID__/delete','Delete this player registration permanently?');addDelete('team-applications','/admin/team-interest/__ID__/delete','Delete this team application permanently?');});</script>"""\n        data = response.get_data(as_text=True)\n        data = data.replace('</body>', script + '</body>')\n        response.set_data(data)\n    return response\n'''
+          if 'def add_admin_delete_controls(response):' not in s:
+              s += hook
+              changed = True
           if changed:
               p.write_text(s)
       - name: Commit patched app.py
@@ -34,5 +38,5 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add app.py
-          git diff --cached --quiet || git commit -m 'Add admin delete routes'
+          git diff --cached --quiet || git commit -m 'Add admin delete controls'
           git push
