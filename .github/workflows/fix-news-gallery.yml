@@ -16,71 +16,109 @@ jobs:
           from pathlib import Path
           import textwrap
 
-          app_path=Path('app.py')
-          app=app_path.read_text()
+          app_path = Path('app.py')
+          app = app_path.read_text()
 
-          schema_old='"ALTER TABLE team_interest ADD COLUMN IF NOT EXISTS payment_reference TEXT"'
-          schema_new='"ALTER TABLE team_interest ADD COLUMN IF NOT EXISTS payment_reference TEXT","ALTER TABLE team_interest ADD COLUMN IF NOT EXISTS payment_screenshot_url TEXT"'
-          if schema_old in app and 'payment_screenshot_url' not in app:
-              app=app.replace(schema_old,schema_new,1)
+          # Make sure the screenshot column exists even on older databases.
+          schema_old = '"ALTER TABLE team_interest ADD COLUMN IF NOT EXISTS payment_reference TEXT"'
+          schema_new = '"ALTER TABLE team_interest ADD COLUMN IF NOT EXISTS payment_reference TEXT","ALTER TABLE team_interest ADD COLUMN IF NOT EXISTS payment_screenshot_url TEXT"'
+          if schema_old in app and 'payment_screenshot_url TEXT' not in app:
+              app = app.replace(schema_old, schema_new, 1)
 
-          marker="@app.get('/teams')"
-          route=textwrap.dedent('''
-          @app.post('/api/team-interest/manual-submit')
-          def team_interest_manual_submit():
-              c=None
-              try:
-                  f=request.form
-                  team_name=f.get('team_name','').strip()
-                  contact_name=f.get('contact_name','').strip()
-                  phone=re.sub(r'\\D','',f.get('phone',''))
-                  email=f.get('email','').strip()
-                  village=f.get('village','').strip()
-                  panchayat=f.get('panchayat','').strip()
-                  image=request.files.get('payment_screenshot')
-                  allowed={'.jpg','.jpeg','.png'}
-                  if not all([team_name,contact_name,email,village,panchayat]) or len(phone)!=10:
-                      return jsonify(ok=False,error='Please complete all required fields with a valid 10-digit phone number.'),400
-                  if not image or not image.filename or Path(image.filename).suffix.lower() not in allowed:
-                      return jsonify(ok=False,error='Please upload a JPG or PNG payment screenshot.'),400
-                  if not os.environ.get('CLOUDINARY_CLOUD_NAME'):
-                      return jsonify(ok=False,error='Payment screenshot storage is not configured yet. Please contact the administrator.'),503
-                  c=db()
-                  interest_no=next_team_interest(c)
-                  uploaded=cloudinary.uploader.upload(image,folder='upl/team-payments',resource_type='image')
-                  screenshot_url=uploaded.get('secure_url')
-                  c.execute('INSERT INTO team_interest(interest_no,team_name,contact_name,phone,email,village,gram_panchayat,registration_fee,interest_charge,payment_status,status,paid_amount,payment_screenshot_url) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',(interest_no,team_name,contact_name,phone,email,village,panchayat,5000,100,'Submitted','Interested',100,screenshot_url))
-                  c.commit()
-                  return jsonify(ok=True,interest_no=interest_no)
-              except Exception as e:
-                  print('TEAM MANUAL SUBMIT ERROR:',repr(e))
-                  if c:
-                      c.rollback()
-                  return jsonify(ok=False,error='Unable to submit registration right now. Please try again.'),500
-              finally:
-                  if c:
-                      c.close()
+          start = app.find("@app.post('/api/team-interest/manual-submit')")
+          end = app.find("@app.get('/teams')", start if start >= 0 else 0)
+          if start >= 0 and end >= 0:
+              route = textwrap.dedent('''
+              @app.post('/api/team-interest/manual-submit')
+              def team_interest_manual_submit():
+                  c = None
+                  try:
+                      f = request.form
+                      team_name = f.get('team_name', '').strip()
+                      contact_name = f.get('contact_name', '').strip()
+                      phone = re.sub(r'\\D', '', f.get('phone', ''))
+                      email = f.get('email', '').strip()
+                      village = f.get('village', '').strip()
+                      panchayat = f.get('panchayat', '').strip()
+                      image = request.files.get('payment_screenshot')
+                      allowed = {'.jpg', '.jpeg', '.png'}
 
-          ''')
-          if 'def team_interest_manual_submit()' not in app:
-              app=app.replace(marker,route+marker,1)
+                      if not all([team_name, contact_name, email, village, panchayat]) or len(phone) != 10:
+                          return jsonify(ok=False, error='Please complete all required fields with a valid 10-digit phone number.'), 400
+                      if not image or not image.filename or Path(image.filename).suffix.lower() not in allowed:
+                          return jsonify(ok=False, error='Please upload a JPG or PNG payment screenshot.'), 400
+
+                      c = db()
+                      # Self-heal older PostgreSQL schemas before inserting the application.
+                      c.execute('ALTER TABLE team_interest ADD COLUMN IF NOT EXISTS payment_screenshot_url TEXT')
+                      interest_no = next_team_interest(c)
+
+                      screenshot_url = None
+                      cloudinary_error = None
+                      cloud_name = os.environ.get('CLOUDINARY_CLOUD_NAME')
+                      api_key = os.environ.get('CLOUDINARY_API_KEY')
+                      api_secret = os.environ.get('CLOUDINARY_API_SECRET')
+
+                      # Prefer Cloudinary, but do not make registration fail when Cloudinary
+                      # is missing/misconfigured. A local copy keeps the application usable.
+                      if cloud_name and api_key and api_secret:
+                          try:
+                              image.stream.seek(0)
+                              uploaded = cloudinary.uploader.upload(
+                                  image,
+                                  folder='upl/team-payments',
+                                  resource_type='image'
+                              )
+                              screenshot_url = uploaded.get('secure_url')
+                          except Exception as upload_error:
+                              cloudinary_error = repr(upload_error)
+                              screenshot_url = None
+
+                      if not screenshot_url:
+                          upload_dir = BASE / 'static' / 'uploads' / 'team-payments'
+                          upload_dir.mkdir(parents=True, exist_ok=True)
+                          ext = Path(image.filename).suffix.lower()
+                          local_name = f"{secrets.token_hex(12)}{ext}"
+                          local_path = upload_dir / local_name
+                          image.stream.seek(0)
+                          image.save(str(local_path))
+                          screenshot_url = f'/static/uploads/team-payments/{local_name}'
+
+                      c.execute(
+                          'INSERT INTO team_interest(interest_no,team_name,contact_name,phone,email,village,gram_panchayat,registration_fee,interest_charge,payment_status,status,paid_amount,payment_screenshot_url) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                          (interest_no, team_name, contact_name, phone, email, village, panchayat, 5000, 100, 'Submitted', 'Interested', 100, screenshot_url)
+                      )
+                      c.commit()
+                      return jsonify(ok=True, interest_no=interest_no)
+                  except Exception as e:
+                      print('TEAM MANUAL SUBMIT ERROR:', repr(e))
+                      if c:
+                          c.rollback()
+                      return jsonify(ok=False, error='Unable to submit registration right now. Please try again.'), 500
+                  finally:
+                      if c:
+                          c.close()
+
+              ''')
+              app = app[:start] + route + app[end:]
           app_path.write_text(app)
 
-          p=Path('templates/team_registration.html')
-          s=p.read_text()
-          old="""try{const r=await fetch('/api/team-interest/manual-submit',{method:'POST',body:new FormData(f)}),d=await r.json();if(!r.ok||!d.ok)throw Error(d.error||'Unable to submit registration.');f.reset();m.textContent='Registration submitted successfully. Interest No: '+d.interest_no+'. Payment will be manually verified by the UPL Organising Committee.';b.disabled=false;b.textContent='SUBMIT TEAM REGISTRATION'}catch(e){m.textContent=e.message;b.disabled=false;b.textContent='SUBMIT TEAM REGISTRATION'}});"""
-          new="""try{const r=await fetch('/api/team-interest/manual-submit',{method:'POST',body:new FormData(f)});let d={};try{d=await r.json()}catch(_){d={ok:false,error:'Server returned an unexpected response. Please try again.'}}if(!r.ok||!d.ok)throw Error(d.error||'Unable to submit registration.');f.reset();m.textContent='Registration submitted successfully. Interest No: '+d.interest_no+'. Payment will be manually verified by the UPL Organising Committee.';b.disabled=false;b.textContent='SUBMIT TEAM REGISTRATION'}catch(e){m.textContent=e.message;b.disabled=false;b.textContent='SUBMIT TEAM REGISTRATION'}});"""
+          # Make the browser handle JSON and non-JSON server errors safely.
+          p = Path('templates/team_registration.html')
+          s = p.read_text()
+          old = """try{const r=await fetch('/api/team-interest/manual-submit',{method:'POST',body:new FormData(f)}),d=await r.json();if(!r.ok||!d.ok)throw Error(d.error||'Unable to submit registration.');f.reset();m.textContent='Registration submitted successfully. Interest No: '+d.interest_no+'. Payment will be manually verified by the UPL Organising Committee.';b.disabled=false;b.textContent='SUBMIT TEAM REGISTRATION'}catch(e){m.textContent=e.message;b.disabled=false;b.textContent='SUBMIT TEAM REGISTRATION'}});"""
+          new = """try{const r=await fetch('/api/team-interest/manual-submit',{method:'POST',body:new FormData(f)});let d={};try{d=await r.json()}catch(_){d={ok:false,error:'Server returned an unexpected response. Please try again.'}}if(!r.ok||!d.ok)throw Error(d.error||'Unable to submit registration.');f.reset();m.textContent='Registration submitted successfully. Interest No: '+d.interest_no+'. Payment will be manually verified by the UPL Organising Committee.';b.disabled=false;b.textContent='SUBMIT TEAM REGISTRATION'}catch(e){m.textContent=e.message;b.disabled=false;b.textContent='SUBMIT TEAM REGISTRATION'}});"""
           if old in s:
-              s=s.replace(old,new,1)
+              s = s.replace(old, new, 1)
           p.write_text(s)
 
-          # Add payment screenshot visibility to admin team table.
-          a=Path('templates/admin.html')
-          h=a.read_text()
-          if "Payment Screenshot" not in h:
-              h=h.replace('<th>Payment</th><th>Order</th>','<th>Payment</th><th>Payment Screenshot</th><th>Order</th>',1)
-              h=h.replace("<td>{{ t['payment_status'] or 'Pending' }}</td><td>{{ t['razorpay_order_id'] or '-' }}</td>","<td>{{ t['payment_status'] or 'Pending' }}</td><td>{% if t.get('payment_screenshot_url') %}<a class=\"btn small\" href=\"{{ t['payment_screenshot_url'] }}\" target=\"_blank\" rel=\"noopener\">VIEW SCREENSHOT</a>{% else %}-{% endif %}</td><td>{{ t['razorpay_order_id'] or '-' }}</td>",1)
-              h=h.replace('<td colspan="16">No team registrations yet.</td>','<td colspan="17">No team registrations yet.</td>',1)
+          # Keep the payment screenshot column visible in the admin dashboard.
+          a = Path('templates/admin.html')
+          h = a.read_text()
+          if 'Payment Screenshot' not in h:
+              h = h.replace('<th>Payment</th><th>Order</th>', '<th>Payment</th><th>Payment Screenshot</th><th>Order</th>', 1)
+              h = h.replace("<td>{{ t['payment_status'] or 'Pending' }}</td><td>{{ t['razorpay_order_id'] or '-' }}</td>", "<td>{{ t['payment_status'] or 'Pending' }}</td><td>{% if t.get('payment_screenshot_url') %}<a class=\"btn small\" href=\"{{ t['payment_screenshot_url'] }}\" target=\"_blank\" rel=\"noopener\">VIEW SCREENSHOT</a>{% else %}-{% endif %}</td><td>{{ t['razorpay_order_id'] or '-' }}</td>", 1)
+              h = h.replace('<td colspan="16">No team registrations yet.</td>', '<td colspan="17">No team registrations yet.</td>', 1)
           a.write_text(h)
           PY
       - name: Validate Python
@@ -90,4 +128,4 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add app.py templates/team_registration.html templates/admin.html
-          if ! git diff --cached --quiet; then git commit -m 'Fix manual team registration payment submission'; git push; fi
+          if ! git diff --cached --quiet; then git commit -m 'Fix team registration screenshot submission'; git push; fi
