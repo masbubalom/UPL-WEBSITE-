@@ -1,0 +1,38 @@
+name: Add admin delete routes
+
+on:
+  push:
+    paths-ignore:
+      - '.github/workflows/**'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Add delete routes if missing
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('app.py')
+          s = p.read_text()
+          changed = False
+          marker = "@app.post('/admin/team/add')"
+          routes = """@app.post('/admin/player/<int:id>/delete')\n@admin_required\ndef player_delete(id):\n    c=db()\n    try: c.execute('DELETE FROM players WHERE id=?',(id,)); c.commit()\n    finally: c.close()\n    return redirect('/admin')\n@app.post('/admin/team-interest/<int:id>/delete')\n@admin_required\ndef team_interest_delete(id):\n    c=db()\n    try: c.execute('DELETE FROM team_interest WHERE id=?',(id,)); c.commit()\n    finally: c.close()\n    return redirect('/admin')\n"""
+          if "def player_delete(id):" not in s:
+              s = s.replace(marker, routes + marker, 1)
+              changed = True
+          if changed:
+              p.write_text(s)
+      - name: Commit patched app.py
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app.py
+          git diff --cached --quiet || git commit -m 'Add admin delete routes'
+          git push
