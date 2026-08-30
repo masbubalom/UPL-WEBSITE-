@@ -76,37 +76,73 @@ def register(): return jsonify(ok=False,error='Please use the secure payment reg
 @app.get('/team-registration')
 def team_registration(): return render_template('team_registration.html',razorpay_key_id=os.environ.get('RAZORPAY_KEY_ID',''))
 
+
 @app.post('/api/team-interest/manual-submit')
 def team_interest_manual_submit():
-    c=None
+    c = None
     try:
-        f=request.form
-        team_name=f.get('team_name','').strip()
-        contact_name=f.get('contact_name','').strip()
-        phone=re.sub(r'\D','',f.get('phone',''))
-        email=f.get('email','').strip()
-        village=f.get('village','').strip()
-        panchayat=f.get('panchayat','').strip()
-        image=request.files.get('payment_screenshot')
-        allowed={'.jpg','.jpeg','.png'}
-        if not all([team_name,contact_name,email,village,panchayat]) or len(phone)!=10:
-            return jsonify(ok=False,error='Please complete all required fields with a valid 10-digit phone number.'),400
+        f = request.form
+        team_name = f.get('team_name', '').strip()
+        contact_name = f.get('contact_name', '').strip()
+        phone = re.sub(r'\D', '', f.get('phone', ''))
+        email = f.get('email', '').strip()
+        village = f.get('village', '').strip()
+        panchayat = f.get('panchayat', '').strip()
+        image = request.files.get('payment_screenshot')
+        allowed = {'.jpg', '.jpeg', '.png'}
+
+        if not all([team_name, contact_name, email, village, panchayat]) or len(phone) != 10:
+            return jsonify(ok=False, error='Please complete all required fields with a valid 10-digit phone number.'), 400
         if not image or not image.filename or Path(image.filename).suffix.lower() not in allowed:
-            return jsonify(ok=False,error='Please upload a JPG or PNG payment screenshot.'),400
-        if not os.environ.get('CLOUDINARY_CLOUD_NAME'):
-            return jsonify(ok=False,error='Payment screenshot storage is not configured yet. Please contact the administrator.'),503
-        c=db()
-        interest_no=next_team_interest(c)
-        uploaded=cloudinary.uploader.upload(image,folder='upl/team-payments',resource_type='image')
-        screenshot_url=uploaded.get('secure_url')
-        c.execute('INSERT INTO team_interest(interest_no,team_name,contact_name,phone,email,village,gram_panchayat,registration_fee,interest_charge,payment_status,status,paid_amount,payment_screenshot_url) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',(interest_no,team_name,contact_name,phone,email,village,panchayat,5000,100,'Submitted','Interested',100,screenshot_url))
+            return jsonify(ok=False, error='Please upload a JPG or PNG payment screenshot.'), 400
+
+        c = db()
+        # Self-heal older PostgreSQL schemas before inserting the application.
+        c.execute('ALTER TABLE team_interest ADD COLUMN IF NOT EXISTS payment_screenshot_url TEXT')
+        interest_no = next_team_interest(c)
+
+        screenshot_url = None
+        cloudinary_error = None
+        cloud_name = os.environ.get('CLOUDINARY_CLOUD_NAME')
+        api_key = os.environ.get('CLOUDINARY_API_KEY')
+        api_secret = os.environ.get('CLOUDINARY_API_SECRET')
+
+        # Prefer Cloudinary, but do not make registration fail when Cloudinary
+        # is missing/misconfigured. A local copy keeps the application usable.
+        if cloud_name and api_key and api_secret:
+            try:
+                image.stream.seek(0)
+                uploaded = cloudinary.uploader.upload(
+                    image,
+                    folder='upl/team-payments',
+                    resource_type='image'
+                )
+                screenshot_url = uploaded.get('secure_url')
+            except Exception as upload_error:
+                cloudinary_error = repr(upload_error)
+                screenshot_url = None
+
+        if not screenshot_url:
+            upload_dir = BASE / 'static' / 'uploads' / 'team-payments'
+            upload_dir.mkdir(parents=True, exist_ok=True)
+            ext = Path(image.filename).suffix.lower()
+            local_name = f"{secrets.token_hex(12)}{ext}"
+            local_path = upload_dir / local_name
+            image.stream.seek(0)
+            image.save(str(local_path))
+            screenshot_url = f'/static/uploads/team-payments/{local_name}'
+
+        c.execute(
+            'INSERT INTO team_interest(interest_no,team_name,contact_name,phone,email,village,gram_panchayat,registration_fee,interest_charge,payment_status,status,paid_amount,payment_screenshot_url) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',
+            (interest_no, team_name, contact_name, phone, email, village, panchayat, 5000, 100, 'Submitted', 'Interested', 100, screenshot_url)
+        )
         c.commit()
-        return jsonify(ok=True,interest_no=interest_no)
+        return jsonify(ok=True, interest_no=interest_no)
     except Exception as e:
-        print('TEAM MANUAL SUBMIT ERROR:',repr(e))
+        print('TEAM MANUAL SUBMIT ERROR:', repr(e))
         if c:
             c.rollback()
-        return jsonify(ok=False,error='Unable to submit registration right now. Please try again.'),500
+        return jsonify(ok=False, error='Unable to submit registration right now. Please try again.'), 500
     finally:
         if c:
             c.close()
