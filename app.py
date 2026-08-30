@@ -201,6 +201,47 @@ def fixture_delete(id):
     try: c.execute('DELETE FROM fixtures WHERE id=?',(id,)); c.commit()
     finally: c.close()
     return redirect('/admin')
+
+@app.post('/admin/news/<int:id>/edit')
+@admin_required
+def news_edit(id):
+    title=request.form.get('title','').strip()
+    body=request.form.get('body','').strip()
+    c=db()
+    try:
+        if title and body:
+            c.execute('UPDATE news SET title=?, body=? WHERE id=?',(title,body,id))
+            c.commit()
+    finally:
+        c.close()
+    return redirect('/admin')
+
+@app.post('/admin/gallery/<int:id>/edit')
+@admin_required
+def gallery_edit(id):
+    title=request.form.get('title','').strip()
+    image=request.files.get('image')
+    c=None
+    try:
+        if image and image.filename:
+            if Path(image.filename).suffix.lower() not in {'.jpg','.jpeg','.png','.webp'}:
+                return redirect('/admin')
+            if not os.environ.get('CLOUDINARY_CLOUD_NAME'):
+                return redirect('/admin')
+            r=cloudinary.uploader.upload(image,folder='upl/gallery',resource_type='image')
+            c=db()
+            c.execute('UPDATE gallery SET title=?, image_path=? WHERE id=?',(title,r['secure_url'],id))
+        else:
+            c=db()
+            c.execute('UPDATE gallery SET title=? WHERE id=?',(title,id))
+        c.commit()
+    except Exception as e:
+        print('GALLERY EDIT ERROR:',repr(e))
+        if c: c.rollback()
+    finally:
+        if c: c.close()
+    return redirect('/admin')
+
 @app.post('/admin/news/add')
 @admin_required
 def news_add():
