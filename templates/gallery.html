@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>UPL Gallery</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<nav class="nav">
+<a class="brand" href="/"><img src="/static/upl-logo.png" alt="UPL Logo"><b>UPL</b></a>
+<div class="links"><a href="/">HOME</a><a href="/registration">REGISTRATION</a><a href="/team-registration">TEAM REGISTRATION</a><a href="/teams">TEAMS</a><a href="/players">PLAYERS</a><a href="/fixtures">FIXTURES</a><a href="/points-table">POINTS TABLE</a><a href="/news">NEWS</a><a href="/gallery">GALLERY</a></div>
+</nav>
+<header class="hero" style="min-height:380px"><div><img src="/static/upl-logo.png" alt="UPL Logo"><h1>UPL <span>Gallery</span></h1><p>Moments, memories and tournament photographs.</p></div></header>
+<main class="wrap">
+<div class="section-head"><div><h2>Gallery</h2><p>Official UPL tournament photos.</p></div></div>
+<div class="gallery">
+{% for g in gallery %}
+<article class="card"><img src="{{ g['image_path'] }}" alt="{{ g['title'] or 'UPL Gallery' }}"><h3>{{ g['title'] or 'UPL' }}</h3></article>
+{% else %}
+<div class="card"><h3>No photos yet</h3><p class="muted">UPL gallery photos will appear here.</p></div>
+{% endfor %}
+</div>
+</main>
+<footer><span>UPL — Uttar Laxmipur Premier League</span><span>Official Tournament Website</span></footer>
+</body>
+</html>
