@@ -1,0 +1,47 @@
+name: Improve registration admin UI
+
+on:
+  push:
+    paths-ignore:
+      - '.github/workflows/**'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-admin-ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Add registration delete buttons and mobile UI
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('templates/admin.html')
+          s = p.read_text()
+
+          old_player = '''<form method="post" action="/admin/player/{{ p['id'] }}/Approved" style="display:inline"><button class="btn small" type="submit">APPROVE</button></form> <form method="post" action="/admin/player/{{ p['id'] }}/Rejected" style="display:inline"><button class="btn small danger" type="submit">REJECT</button></form>'''
+          new_player = '''<div class="registration-actions"><form method="post" action="/admin/player/{{ p['id'] }}/Approved"><button class="btn small" type="submit">APPROVE</button></form><form method="post" action="/admin/player/{{ p['id'] }}/Rejected"><button class="btn small danger" type="submit">REJECT</button></form><form method="post" action="/admin/player/{{ p['id'] }}/delete" onsubmit="return confirm('Delete this player registration permanently?')"><button class="btn small delete-btn" type="submit">DELETE</button></form></div>'''
+          s = s.replace(old_player, new_player)
+
+          old_team = '''<div class="action-row"><form method="post" action="/admin/team-interest/{{ t['id'] }}/Contacted"><button class="btn small">CONTACTED</button></form><form method="post" action="/admin/team-interest/{{ t['id'] }}/Approved"><button class="btn small">APPROVE</button></form><form method="post" action="/admin/team-interest/{{ t['id'] }}/Rejected"><button class="btn small danger">REJECT</button></form></div>'''
+          new_team = '''<div class="registration-actions"><form method="post" action="/admin/team-interest/{{ t['id'] }}/Contacted"><button class="btn small" type="submit">CONTACTED</button></form><form method="post" action="/admin/team-interest/{{ t['id'] }}/Approved"><button class="btn small" type="submit">APPROVE</button></form><form method="post" action="/admin/team-interest/{{ t['id'] }}/Rejected"><button class="btn small danger" type="submit">REJECT</button></form><form method="post" action="/admin/team-interest/{{ t['id'] }}/delete" onsubmit="return confirm('Delete this team registration permanently?')"><button class="btn small delete-btn" type="submit">DELETE</button></form></div>'''
+          s = s.replace(old_team, new_team)
+
+          css = '''<style>
+          .registration-actions{display:flex;flex-wrap:wrap;gap:6px;align-items:center;min-width:250px}.registration-actions form{margin:0}.delete-btn{background:#7f1d2d!important;color:#fff!important;border:1px solid #a3263b!important}.delete-btn:hover{background:#a3263b!important}.table-wrap{-webkit-overflow-scrolling:touch}.table td,.table th{vertical-align:middle}.table th:last-child,.table td:last-child{min-width:250px}
+          @media(max-width:700px){.admin-section{margin:22px 0}.admin-section .section-head h2{font-size:28px}.admin-section .section-head p{font-size:14px}.table-wrap{border-radius:14px}.table{min-width:1050px}.registration-actions{min-width:235px}.registration-actions .btn.small{min-height:40px;padding:9px 13px;font-size:12px}.stats{gap:10px}.stat{min-width:0}.admin-nav{overflow-x:auto;flex-wrap:nowrap;padding-bottom:5px}.admin-nav a{white-space:nowrap}.admin-note{font-size:13px}}
+          </style>'''
+          if 'registration-actions{' not in s:
+              s = s.replace('</style></head>', css + '</style></head>', 1)
+
+          p.write_text(s)
+      - name: Commit admin UI changes
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add templates/admin.html
+          git diff --cached --quiet || git commit -m 'Add delete actions to player and team registrations'
+          git push
