@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>UPL Fixtures & Results</title>
+<link rel="stylesheet" href="/static/style.css">
+<style>
+.fixture-tabs{display:flex;gap:10px;flex-wrap:wrap;margin:20px 0}.fixture-tab{padding:10px 16px;border:1px solid #333;border-radius:999px;text-decoration:none}.fixture-section{margin:30px 0}.match-card{padding:20px;margin:12px 0}.match-head{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}.teams{font-size:20px;font-weight:800;margin:16px 0}.result{font-size:17px;font-weight:700}.badge{display:inline-block;padding:5px 10px;border-radius:999px;font-size:12px;font-weight:800}.live{background:#45151a;color:#ff7885}.upcoming{background:#182e40;color:#8ecbff}.completed{background:#18351f;color:#8fe3a1}.empty{padding:18px}
+</style>
+</head>
+<body>
+<nav class="nav"><a class="brand" href="/"><img src="/static/upl-logo.png"><b>UPL</b></a><div class="links"><a href="/">HOME</a><a href="/registration">REGISTRATION</a><a href="/team-registration">TEAM REGISTRATION</a><a href="/teams">TEAMS</a><a href="/players">PLAYERS</a><a href="/fixtures">FIXTURES & RESULTS</a><a href="/points-table">POINTS TABLE</a><a href="/news">NEWS</a><a href="/gallery">GALLERY</a></div></nav>
+<header class="hero" style="min-height:auto;padding:48px 20px"><div><img src="/static/upl-logo.png" style="width:min(190px,55vw)"><h1>Fixtures <span>& Results</span></h1><p>Upcoming matches, live games and completed results</p></div></header>
+<main class="wrap">
+{% set live = fixtures | selectattr('status','equalto','Live') | list %}
+{% set completed = fixtures | selectattr('status','equalto','Completed') | list %}
+{% set upcoming = fixtures | rejectattr('status','equalto','Live') | rejectattr('status','equalto','Completed') | list %}
+<section class="fixture-section"><h2>🔴 LIVE MATCHES</h2>{% for f in live %}<div class="card match-card"><div class="match-head"><span>Match {{ f['match_no'] }}</span><span class="badge live">LIVE</span></div><div class="teams">{{ f['team1'] }} <span>vs</span> {{ f['team2'] }}</div><p class="muted">{{ f['venue'] }}{% if f['match_date'] %} • {{ f['match_date'] }}{% endif %}{% if f['match_time'] %} • {{ f['match_time'] }}{% endif %}</p>{% if f['result_text'] %}<p class="result">{{ f['result_text'] }}</p>{% endif %}</div>{% else %}<div class="card empty">No live match right now.</div>{% endfor %}</section>
+<section class="fixture-section"><h2>⏳ UPCOMING MATCHES</h2>{% for f in upcoming %}<div class="card match-card"><div class="match-head"><span>Match {{ f['match_no'] }}</span><span class="badge upcoming">UPCOMING</span></div><div class="teams">{{ f['team1'] }} <span>vs</span> {{ f['team2'] }}</div><p class="muted">{{ f['venue'] }}{% if f['match_date'] %} • {{ f['match_date'] }}{% endif %}{% if f['match_time'] %} • {{ f['match_time'] }}{% endif %}</p></div>{% else %}<div class="card empty">No upcoming matches.</div>{% endfor %}</section>
+<section class="fixture-section"><h2>🏆 PAST MATCHES & RESULTS</h2>{% for f in completed %}<div class="card match-card"><div class="match-head"><span>Match {{ f['match_no'] }}</span><span class="badge completed">COMPLETED</span></div><div class="teams">{{ f['team1'] }} <span>vs</span> {{ f['team2'] }}</div><p class="result">{{ f['result_text'] or 'Result not entered yet.' }}</p><p class="muted">{{ f['venue'] }}{% if f['match_date'] %} • {{ f['match_date'] }}{% endif %}</p></div>{% else %}<div class="card empty">No completed matches yet.</div>{% endfor %}</section>
+</main><footer><span>© 2026 UPL • Uttar Lakshmipur Premier League</span><span>Venue: Uttar Lakshmipur High School</span></footer>
+</body></html>
