@@ -1,4 +1,4 @@
-name: Fix News Gallery Management
+name: Fix UPL Team Registration
 on:
   push:
     paths:
@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Patch app routes and admin UI
+      - name: Patch backend and frontend
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -18,65 +18,70 @@ jobs:
 
           app_path=Path('app.py')
           app=app_path.read_text()
-          marker="@app.post('/admin/news/add')"
-          routes=textwrap.dedent('''
-          @app.post('/admin/news/<int:id>/edit')
-          @admin_required
-          def news_edit(id):
-              title=request.form.get('title','').strip()
-              body=request.form.get('body','').strip()
-              c=db()
-              try:
-                  if title and body:
-                      c.execute('UPDATE news SET title=?, body=? WHERE id=?',(title,body,id))
-                      c.commit()
-              finally:
-                  c.close()
-              return redirect('/admin')
 
-          @app.post('/admin/gallery/<int:id>/edit')
-          @admin_required
-          def gallery_edit(id):
-              title=request.form.get('title','').strip()
-              image=request.files.get('image')
+          schema_old='"ALTER TABLE team_interest ADD COLUMN IF NOT EXISTS payment_reference TEXT"'
+          schema_new='"ALTER TABLE team_interest ADD COLUMN IF NOT EXISTS payment_reference TEXT","ALTER TABLE team_interest ADD COLUMN IF NOT EXISTS payment_screenshot_url TEXT"'
+          if schema_old in app and 'payment_screenshot_url' not in app:
+              app=app.replace(schema_old,schema_new,1)
+
+          marker="@app.get('/teams')"
+          route=textwrap.dedent('''
+          @app.post('/api/team-interest/manual-submit')
+          def team_interest_manual_submit():
               c=None
               try:
-                  if image and image.filename:
-                      if Path(image.filename).suffix.lower() not in {'.jpg','.jpeg','.png','.webp'}:
-                          return redirect('/admin')
-                      if not os.environ.get('CLOUDINARY_CLOUD_NAME'):
-                          return redirect('/admin')
-                      r=cloudinary.uploader.upload(image,folder='upl/gallery',resource_type='image')
-                      c=db()
-                      c.execute('UPDATE gallery SET title=?, image_path=? WHERE id=?',(title,r['secure_url'],id))
-                  else:
-                      c=db()
-                      c.execute('UPDATE gallery SET title=? WHERE id=?',(title,id))
+                  f=request.form
+                  team_name=f.get('team_name','').strip()
+                  contact_name=f.get('contact_name','').strip()
+                  phone=re.sub(r'\\D','',f.get('phone',''))
+                  email=f.get('email','').strip()
+                  village=f.get('village','').strip()
+                  panchayat=f.get('panchayat','').strip()
+                  image=request.files.get('payment_screenshot')
+                  allowed={'.jpg','.jpeg','.png'}
+                  if not all([team_name,contact_name,email,village,panchayat]) or len(phone)!=10:
+                      return jsonify(ok=False,error='Please complete all required fields with a valid 10-digit phone number.'),400
+                  if not image or not image.filename or Path(image.filename).suffix.lower() not in allowed:
+                      return jsonify(ok=False,error='Please upload a JPG or PNG payment screenshot.'),400
+                  if not os.environ.get('CLOUDINARY_CLOUD_NAME'):
+                      return jsonify(ok=False,error='Payment screenshot storage is not configured yet. Please contact the administrator.'),503
+                  c=db()
+                  interest_no=next_team_interest(c)
+                  uploaded=cloudinary.uploader.upload(image,folder='upl/team-payments',resource_type='image')
+                  screenshot_url=uploaded.get('secure_url')
+                  c.execute('INSERT INTO team_interest(interest_no,team_name,contact_name,phone,email,village,gram_panchayat,registration_fee,interest_charge,payment_status,status,paid_amount,payment_screenshot_url) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',(interest_no,team_name,contact_name,phone,email,village,panchayat,5000,100,'Submitted','Interested',100,screenshot_url))
                   c.commit()
+                  return jsonify(ok=True,interest_no=interest_no)
               except Exception as e:
-                  print('GALLERY EDIT ERROR:',repr(e))
-                  if c: c.rollback()
+                  print('TEAM MANUAL SUBMIT ERROR:',repr(e))
+                  if c:
+                      c.rollback()
+                  return jsonify(ok=False,error='Unable to submit registration right now. Please try again.'),500
               finally:
-                  if c: c.close()
-              return redirect('/admin')
+                  if c:
+                      c.close()
 
           ''')
-          if 'def news_edit(id):' not in app:
-              app=app.replace(marker,routes+marker,1)
-              app_path.write_text(app)
+          if 'def team_interest_manual_submit()' not in app:
+              app=app.replace(marker,route+marker,1)
+          app_path.write_text(app)
 
-          p=Path('templates/admin.html')
+          p=Path('templates/team_registration.html')
           s=p.read_text()
-          old_news="""{% for n in news %}<div class=\"card\" style=\"margin:8px 0\"><b>{{ n['title'] }}</b><p class=\"muted\">{{ n['body'] }}</p><form method=\"post\" action=\"/admin/news/delete/{{ n['id'] }}\"><button class=\"btn small danger\" type=\"submit\">DELETE</button></form></div>{% else %}<p class=\"muted\">No announcements yet.</p>{% endfor %}"""
-          new_news="""{% for n in news %}<div class=\"card\" style=\"margin:8px 0\"><b>{{ n['title'] }}</b><p class=\"muted\">{{ n['body'] }}</p><div class=\"registration-actions\"><button class=\"btn small\" type=\"button\" onclick=\"toggleEdit('news-{{ n['id'] }}')\">EDIT</button><form method=\"post\" action=\"/admin/news/delete/{{ n['id'] }}\" onsubmit=\"return confirm('Delete this news item?')\"><button class=\"btn small danger\" type=\"submit\">DELETE</button></form></div><form id=\"edit-news-{{ n['id'] }}\" class=\"edit-box hidden\" method=\"post\" action=\"/admin/news/{{ n['id'] }}/edit\"><p><label>Title</label><input name=\"title\" value=\"{{ n['title'] }}\" required></p><p><label>Announcement</label><textarea name=\"body\" required>{{ n['body'] }}</textarea></p><button class=\"btn small\" type=\"submit\">SAVE CHANGES</button> <button class=\"btn small\" type=\"button\" onclick=\"toggleEdit('news-{{ n['id'] }}')\">CANCEL</button></form></div>{% else %}<p class=\"muted\">No announcements yet.</p>{% endfor %}"""
-          if old_news in s:
-              s=s.replace(old_news,new_news,1)
-
-          old_gallery="""{% for g in gallery %}<div class=\"card\" style=\"display:inline-block;margin:6px;vertical-align:top;width:180px\"><img src=\"{{ g['image_path'] }}\" alt=\"{{ g['title'] or 'UPL Gallery' }}\" style=\"width:100%;height:120px;object-fit:cover;border-radius:6px\"><p>{{ g['title'] or 'UPL Photo' }}</p><form method=\"post\" action=\"/admin/gallery/delete/{{ g['id'] }}\"><button class=\"btn small danger\" type=\"submit\">DELETE</button></form></div>{% else %}<p class=\"muted\">No gallery photos yet.</p>{% endfor %}"""
-          new_gallery="""{% for g in gallery %}<div class=\"card\" style=\"display:inline-block;margin:6px;vertical-align:top;width:220px\"><img src=\"{{ g['image_path'] if g['image_path'].startswith('http') else '/uploads/' ~ g['image_path'] }}\" alt=\"{{ g['title'] or 'UPL Gallery' }}\" style=\"width:100%;height:145px;object-fit:cover;border-radius:6px\"><p>{{ g['title'] or 'UPL Photo' }}</p><div class=\"registration-actions\"><button class=\"btn small\" type=\"button\" onclick=\"toggleEdit('gallery-{{ g['id'] }}')\">EDIT</button><form method=\"post\" action=\"/admin/gallery/delete/{{ g['id'] }}\" onsubmit=\"return confirm('Delete this gallery photo?')\"><button class=\"btn small danger\" type=\"submit\">DELETE</button></form></div><form id=\"edit-gallery-{{ g['id'] }}\" class=\"edit-box hidden\" method=\"post\" action=\"/admin/gallery/{{ g['id'] }}/edit\" enctype=\"multipart/form-data\"><p><label>Title</label><input name=\"title\" value=\"{{ g['title'] or '' }}\"></p><p><label>Replace Image (optional)</label><input name=\"image\" type=\"file\" accept=\".jpg,.jpeg,.png,.webp\"></p><button class=\"btn small\" type=\"submit\">SAVE CHANGES</button> <button class=\"btn small\" type=\"button\" onclick=\"toggleEdit('gallery-{{ g['id'] }}')\">CANCEL</button></form></div>{% else %}<p class=\"muted\">No gallery photos yet.</p>{% endfor %}"""
-          if old_gallery in s:
-              s=s.replace(old_gallery,new_gallery,1)
+          old="""try{const r=await fetch('/api/team-interest/manual-submit',{method:'POST',body:new FormData(f)}),d=await r.json();if(!r.ok||!d.ok)throw Error(d.error||'Unable to submit registration.');f.reset();m.textContent='Registration submitted successfully. Interest No: '+d.interest_no+'. Payment will be manually verified by the UPL Organising Committee.';b.disabled=false;b.textContent='SUBMIT TEAM REGISTRATION'}catch(e){m.textContent=e.message;b.disabled=false;b.textContent='SUBMIT TEAM REGISTRATION'}});"""
+          new="""try{const r=await fetch('/api/team-interest/manual-submit',{method:'POST',body:new FormData(f)});let d={};try{d=await r.json()}catch(_){d={ok:false,error:'Server returned an unexpected response. Please try again.'}}if(!r.ok||!d.ok)throw Error(d.error||'Unable to submit registration.');f.reset();m.textContent='Registration submitted successfully. Interest No: '+d.interest_no+'. Payment will be manually verified by the UPL Organising Committee.';b.disabled=false;b.textContent='SUBMIT TEAM REGISTRATION'}catch(e){m.textContent=e.message;b.disabled=false;b.textContent='SUBMIT TEAM REGISTRATION'}});"""
+          if old in s:
+              s=s.replace(old,new,1)
           p.write_text(s)
+
+          # Add payment screenshot visibility to admin team table.
+          a=Path('templates/admin.html')
+          h=a.read_text()
+          if "Payment Screenshot" not in h:
+              h=h.replace('<th>Payment</th><th>Order</th>','<th>Payment</th><th>Payment Screenshot</th><th>Order</th>',1)
+              h=h.replace("<td>{{ t['payment_status'] or 'Pending' }}</td><td>{{ t['razorpay_order_id'] or '-' }}</td>","<td>{{ t['payment_status'] or 'Pending' }}</td><td>{% if t.get('payment_screenshot_url') %}<a class=\"btn small\" href=\"{{ t['payment_screenshot_url'] }}\" target=\"_blank\" rel=\"noopener\">VIEW SCREENSHOT</a>{% else %}-{% endif %}</td><td>{{ t['razorpay_order_id'] or '-' }}</td>",1)
+              h=h.replace('<td colspan="16">No team registrations yet.</td>','<td colspan="17">No team registrations yet.</td>',1)
+          a.write_text(h)
           PY
       - name: Validate Python
         run: python -m py_compile app.py
@@ -84,5 +89,5 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add app.py templates/admin.html
-          if ! git diff --cached --quiet; then git commit -m 'Fix news and gallery edit controls'; git push; fi
+          git add app.py templates/team_registration.html templates/admin.html
+          if ! git diff --cached --quiet; then git commit -m 'Fix manual team registration payment submission'; git push; fi
