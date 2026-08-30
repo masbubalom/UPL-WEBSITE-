@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>UPL Points Table</title><link rel="stylesheet" href="/static/style.css">
+<style>
+.points-table-wrap{overflow-x:auto}.nrr-positive{color:#54d17a;font-weight:700}.nrr-negative{color:#ff6875;font-weight:700}.nrr-zero{color:inherit}.group-title{margin:28px 0 12px}.empty{padding:18px}
+</style>
+</head>
+<body>
+<nav class="nav"><a class="brand" href="/"><img src="/static/upl-logo.png"><b>UPL</b></a><div class="links"><a href="/">HOME</a><a href="/registration">REGISTRATION</a><a href="/team-registration">TEAM REGISTRATION</a><a href="/teams">TEAMS</a><a href="/players">PLAYERS</a><a href="/fixtures">FIXTURES</a><a href="/points-table">POINTS TABLE</a><a href="/news">NEWS</a><a href="/gallery">GALLERY</a></div></nav>
+<header class="hero" style="min-height:auto;padding:45px 20px"><div><img src="/static/upl-logo.png" style="width:min(190px,55vw)"><h1>Points <span>Table</span></h1><p>UPL Tournament Standings</p></div></header>
+<main class="wrap">
+<section><h2 class="group-title">GROUP A</h2><div class="card points-table-wrap"><table class="table"><tr><th>POS</th><th>TEAM</th><th>P</th><th>W</th><th>L</th><th>T</th><th>PTS</th><th>NRR</th></tr>
+{% set group_a = points | selectattr('group', 'equalto', 'A') | list %}
+{% for p in group_a %}<tr><td>{{ loop.index }}</td><td>{{ p['team_name'] }}</td><td>{{ p['played'] }}</td><td>{{ p['won'] }}</td><td>{{ p['lost'] }}</td><td>{{ p['tied'] }}</td><td><b>{{ p['points'] }}</b></td><td class="{% if p['nrr'] > 0 %}nrr-positive{% elif p['nrr'] < 0 %}nrr-negative{% else %}nrr-zero{% endif %}">{{ '%.3f'|format(p['nrr'] or 0) }}</td></tr>{% else %}<tr><td colspan="8" class="empty">No Group A teams added yet.</td></tr>{% endfor %}
+</table></div></section>
+<section><h2 class="group-title">GROUP B</h2><div class="card points-table-wrap"><table class="table"><tr><th>POS</th><th>TEAM</th><th>P</th><th>W</th><th>L</th><th>T</th><th>PTS</th><th>NRR</th></tr>
+{% set group_b = points | selectattr('group', 'equalto', 'B') | list %}
+{% for p in group_b %}<tr><td>{{ loop.index }}</td><td>{{ p['team_name'] }}</td><td>{{ p['played'] }}</td><td>{{ p['won'] }}</td><td>{{ p['lost'] }}</td><td>{{ p['tied'] }}</td><td><b>{{ p['points'] }}</b></td><td class="{% if p['nrr'] > 0 %}nrr-positive{% elif p['nrr'] < 0 %}nrr-negative{% else %}nrr-zero{% endif %}">{{ '%.3f'|format(p['nrr'] or 0) }}</td></tr>{% else %}<tr><td colspan="8" class="empty">No Group B teams added yet.</td></tr>{% endfor %}
+</table></div></section>
+</main><footer><span>© 2026 UPL • Uttar Lakshmipur Premier League</span><span>Venue: Uttar Lakshmipur High School</span></footer>
+</body></html>
