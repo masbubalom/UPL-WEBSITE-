@@ -56,6 +56,7 @@ with psycopg.connect(DATABASE_URL) as c:
         CREATE TABLE IF NOT EXISTS points_table (
             id SERIAL PRIMARY KEY,
             team_name TEXT UNIQUE NOT NULL,
+            group_name TEXT DEFAULT 'A',
             played INTEGER DEFAULT 0,
             won INTEGER DEFAULT 0,
             lost INTEGER DEFAULT 0,
@@ -93,7 +94,7 @@ with psycopg.connect(DATABASE_URL) as c:
         );
     """)
 
-    # Upgrade older databases without deleting any existing data.
+    c.execute("ALTER TABLE points_table ADD COLUMN IF NOT EXISTS group_name TEXT DEFAULT 'A'")
     c.execute("ALTER TABLE team_interest ADD COLUMN IF NOT EXISTS contact_name TEXT")
     c.execute("ALTER TABLE team_interest ADD COLUMN IF NOT EXISTS representative_name TEXT")
     c.execute("ALTER TABLE team_interest ADD COLUMN IF NOT EXISTS interest_amount INTEGER DEFAULT 100")
