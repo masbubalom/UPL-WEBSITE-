@@ -1,0 +1,29 @@
+name: Apply manual team QR payment
+on:
+  push:
+    paths-ignore:
+      - '.github/workflows/**'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply manual payment changes
+        env:
+          PATCH_B64: __PATCH_B64__
+        run: |
+          python - <<'PY'
+          import os,base64
+          exec(base64.b64decode(os.environ['PATCH_B64']).decode())
+          PY
+      - name: Commit changes
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app.py templates/team_registration.html templates/admin.html static/team-payment-qr.png
+          git diff --cached --quiet || git commit -m 'Use QR payment for team registration'
+          git push
