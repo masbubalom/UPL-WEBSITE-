@@ -138,6 +138,20 @@ def player_action(id,action):
     try: c.execute('UPDATE players SET status=? WHERE id=?',(action,id)); c.commit()
     finally: c.close()
     return redirect('/admin')
+@app.post('/admin/player/<int:id>/delete')
+@admin_required
+def player_delete(id):
+    c=db()
+    try: c.execute('DELETE FROM players WHERE id=?',(id,)); c.commit()
+    finally: c.close()
+    return redirect('/admin')
+@app.post('/admin/team-interest/<int:id>/delete')
+@admin_required
+def team_interest_delete(id):
+    c=db()
+    try: c.execute('DELETE FROM team_interest WHERE id=?',(id,)); c.commit()
+    finally: c.close()
+    return redirect('/admin')
 @app.post('/admin/team/add')
 @admin_required
 def team_add():
@@ -241,3 +255,12 @@ def gallery_delete(id):
 @app.get('/health')
 def health(): return jsonify(status='ok',service='UPL Website')
 if __name__=='__main__': app.run(host='0.0.0.0',port=int(os.environ.get('PORT',5000)),debug=False)
+
+@app.after_request
+def add_admin_delete_controls(response):
+    if request.path == '/admin' and response.content_type.startswith('text/html'):
+        script = """<style>.admin-delete-btn{margin-left:6px!important;background:#5b1720!important;color:#fff!important;border:1px solid #8b2330!important}</style><script>document.addEventListener('DOMContentLoaded',function(){function addDelete(section,endpoint,confirmText){var box=document.getElementById(section);if(!box)return;box.querySelectorAll('table tbody tr').forEach(function(row){var cells=row.querySelectorAll('td');if(!cells.length)return;var idMatch=row.innerHTML.match(/(?:player|team-interest)\/(\d+)/);if(!idMatch)return;var id=idMatch[1];var cell=cells[cells.length-1];if(cell.querySelector('.admin-delete-btn'))return;var form=document.createElement('form');form.method='post';form.action=endpoint.replace('__ID__',id);form.style.display='inline';var b=document.createElement('button');b.type='submit';b.className='btn small danger admin-delete-btn';b.textContent='DELETE';b.onclick=function(){return confirm(confirmText)};form.appendChild(b);cell.appendChild(form);});}addDelete('players','/admin/player/__ID__/delete','Delete this player registration permanently?');addDelete('team-applications','/admin/team-interest/__ID__/delete','Delete this team application permanently?');});</script>"""
+        data = response.get_data(as_text=True)
+        data = data.replace('</body>', script + '</body>')
+        response.set_data(data)
+    return response
