@@ -1,4 +1,4 @@
-name: Apply manual team QR payment
+name: Apply manual team payment
 on:
   push:
     paths-ignore:
@@ -10,20 +10,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Apply manual payment changes
-        env:
-          PATCH_B64: __PATCH_B64__
+        with: {fetch-depth: 0}
+      - name: Patch app and team registration
+        shell: python
         run: |
-          python - <<'PY'
-          import os,base64
-          exec(base64.b64decode(os.environ['PATCH_B64']).decode())
-          PY
-      - name: Commit changes
+          from pathlib import Path
+          app=Path('app.py'); s=app.read_text()
+          route='''\n\n@app.post('/api/team-interest/manual-submit')\ndef team_interest_manual_submit():\n    f=request.form\n    image=request.files.get('payment_screenshot')\n    required=['team_name','contact_name','phone','email','village','panchayat']\n    if any(not f.get(k,'').strip() for k in required): return jsonify(ok=False,error='Please complete all registration fields.'),400\n    if not image or not image.filename: return jsonify(ok=False,error='Please upload the successful ₹100 payment screenshot.'),400\n    if Path(image.filename).suffix.lower() not in {'.jpg','.jpeg','.png'}: return jsonify(ok=False,error='Payment screenshot must be JPG or PNG.'),400\n    c=db()\n    try:\n        c.execute('ALTER TABLE team_interest ADD COLUMN IF NOT EXISTS payment_screenshot_path TEXT')\n        interest_no=next_team_interest(c)\n        if not os.environ.get('CLOUDINARY_CLOUD_NAME'): return jsonify(ok=False,error='Payment upload is temporarily unavailable.'),503\n        upload=cloudinary.uploader.upload(image,folder='upl/team-payment-screenshots',resource_type='image')\n        c.execute('INSERT INTO team_interest (interest_no,team_name,contact_name,phone,email,village,gram_panchayat,registration_fee,interest_charge,payment_status,status,paid_amount,payment_reference,payment_screenshot_path) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',(interest_no,f['team_name'].strip(),f['contact_name'].strip(),f['phone'].strip(),f['email'].strip().lower(),f['village'].strip(),f['panchayat'].strip(),5000,100,'Manual Review','Pending Verification',100,'Manual QR Payment',upload['secure_url']))\n        c.commit(); return jsonify(ok=True,interest_no=interest_no)\n    except Exception as e:\n        c.rollback(); print('MANUAL TEAM PAYMENT ERROR:',repr(e)); return jsonify(ok=False,error='Unable to submit the registration right now. Please try again.'),500\n    finally: c.close()\n'''
+          if 'def team_interest_manual_submit' not in s:
+              marker='if __name__ == "__main__":'
+              s=s.replace(marker,route+'\n'+marker,1)
+              app.write_text(s)
+          Path('templates/team_registration.html').write_text('''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>UPL Team Registration</title><link rel="stylesheet" href="/static/style.css"><style>.registration-hero{min-height:auto!important;padding:45px 20px 50px!important}.registration-hero img{width:min(210px,55vw)!important;height:auto}.registration-hero h1{font-size:clamp(42px,7vw,64px)!important;line-height:.95!important;margin:14px 0!important}.registration-hero p{font-size:16px!important}.manual-pay{text-align:center;margin-top:20px}.manual-pay img{display:block;width:min(360px,82vw);height:auto;margin:18px auto;border-radius:12px;background:#fff;padding:8px}.payment-warning{border:1px solid #6f2832;background:#1b1013;border-radius:10px;padding:12px;margin-top:12px}@media(max-width:700px){.registration-hero{padding:45px 16px 40px!important}.registration-hero img{width:150px!important}.registration-hero h1{font-size:42px!important}.registration-hero p{font-size:14px!important}}</style></head><body><nav class="nav"><a class="brand" href="/"><img src="/static/upl-logo.png" alt="UPL Logo"><b>UPL</b></a><div class="links"><a href="/">HOME</a><a href="/registration">REGISTRATION</a><a href="/team-registration">TEAM REGISTRATION</a><a href="/teams">TEAMS</a><a href="/players">PLAYERS</a><a href="/fixtures">FIXTURES</a><a href="/points-table">POINTS TABLE</a><a href="/news">NEWS</a><a href="/gallery">GALLERY</a></div></nav><header class="hero registration-hero"><div><img src="/static/upl-logo.png" alt="UPL Logo"><h1>Team <span>Registration</span></h1><p>Show your interest in participating in UPL.</p></div></header><main class="wrap"><div class="card"><p><strong>Team Registration Fee: ₹5,000</strong><br><span class="muted">The ₹5,000 registration fee is NOT being collected now.</span></p><p><strong>Interest/Application Charge: ₹100</strong><br><span class="muted">Pay the ₹100 interest charge by scanning the QR code below. Razorpay is not used for team registration.</span></p></div><section class="card manual-pay"><h2>PAY ₹100 BY QR CODE</h2><img src="/static/team-payment-qr.png" alt="UPL Team Registration Payment QR Code"><p><strong>Scan this QR code and pay exactly ₹100.</strong></p><p class="muted">After payment, upload the successful payment screenshot below. The UPL Organising Committee will manually verify the payment.</p><div class="payment-warning"><strong>Important:</strong> Make sure the screenshot clearly shows the successful ₹100 payment.</div></section><section class="card"><form id="teamForm" class="grid" enctype="multipart/form-data"><div><label>Team Name</label><input name="team_name" required></div><div><label>Contact Person</label><input name="contact_name" required></div><div><label>Phone / WhatsApp</label><input name="phone" inputmode="numeric" maxlength="10" required></div><div><label>Email</label><input name="email" type="email" required></div><div><label>Village</label><input name="village" required></div><div><label>Gram Panchayat</label><select name="panchayat" required><option value="">Select Panchayat</option>{% for p in panchayats %}<option value="{{p}}">{{p}}</option>{% endfor %}</select></div><div class="full"><label>Payment Successful Screenshot (JPG / PNG)</label><input name="payment_screenshot" type="file" accept="image/jpeg,image/png,.jpg,.jpeg,.png" required></div><div class="full"><button class="btn" id="submitBtn" type="submit">SUBMIT TEAM REGISTRATION</button></div></form><div id="message" style="margin-top:15px"></div></section></main><script>const f=document.getElementById('teamForm'),b=document.getElementById('submitBtn'),m=document.getElementById('message');f.addEventListener('submit',async e=>{e.preventDefault();if(!f.checkValidity()){f.reportValidity();return}const x=f.payment_screenshot.files[0];if(!x||!['image/jpeg','image/png'].includes(x.type)){m.textContent='Please upload a JPG or PNG payment screenshot.';return}b.disabled=true;b.textContent='SUBMITTING...';try{const r=await fetch('/api/team-interest/manual-submit',{method:'POST',body:new FormData(f)}),d=await r.json();if(!r.ok||!d.ok)throw Error(d.error||'Unable to submit registration.');f.reset();m.textContent='Registration submitted successfully. Interest No: '+d.interest_no+'. Payment will be manually verified by the UPL Organising Committee.';b.disabled=false;b.textContent='SUBMIT TEAM REGISTRATION'}catch(e){m.textContent=e.message;b.disabled=false;b.textContent='SUBMIT TEAM REGISTRATION'}});</script></body></html>''')
+      - name: Commit
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add app.py templates/team_registration.html templates/admin.html static/team-payment-qr.png
-          git diff --cached --quiet || git commit -m 'Use QR payment for team registration'
+          git add app.py templates/team_registration.html
+          git diff --cached --quiet || git commit -m 'Switch team registration to manual QR payment'
           git push
