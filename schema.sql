@@ -1,0 +1,92 @@
+CREATE TABLE IF NOT EXISTS admins (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  username VARCHAR(100) NOT NULL UNIQUE,
+  password_hash VARCHAR(255) NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS teams (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(255) NOT NULL UNIQUE,
+  description TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS players (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  registration_no VARCHAR(50) NOT NULL UNIQUE,
+  full_name VARCHAR(255) NOT NULL,
+  age INT NOT NULL,
+  phone VARCHAR(30) NOT NULL,
+  email VARCHAR(255) NOT NULL,
+  village VARCHAR(255) NOT NULL,
+  gram_panchayat VARCHAR(255) NOT NULL,
+  primary_role VARCHAR(50) NOT NULL,
+  batting_style VARCHAR(100),
+  bowling_style VARCHAR(100),
+  photo_path TEXT,
+  payment_status VARCHAR(50) DEFAULT 'Paid',
+  paid_amount INT DEFAULT 0,
+  status VARCHAR(50) DEFAULT 'Pending',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_player_phone (phone),
+  UNIQUE KEY uq_player_email (email)
+);
+
+CREATE TABLE IF NOT EXISTS team_interest (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  interest_no VARCHAR(50) NOT NULL UNIQUE,
+  team_name VARCHAR(255) NOT NULL,
+  contact_name VARCHAR(255) NOT NULL,
+  phone VARCHAR(30) NOT NULL,
+  email VARCHAR(255) NOT NULL,
+  village VARCHAR(255) NOT NULL,
+  gram_panchayat VARCHAR(255) NOT NULL,
+  registration_fee INT DEFAULT 5000,
+  interest_charge INT DEFAULT 100,
+  payment_status VARCHAR(50) DEFAULT 'Submitted',
+  status VARCHAR(50) DEFAULT 'Interested',
+  paid_amount INT DEFAULT 100,
+  payment_screenshot_url TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS fixtures (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  match_no VARCHAR(50),
+  team1 VARCHAR(255) NOT NULL,
+  team2 VARCHAR(255) NOT NULL,
+  match_date DATE,
+  match_time VARCHAR(50),
+  venue VARCHAR(255) DEFAULT 'Uttar Lakshmipur High School',
+  status VARCHAR(50) DEFAULT 'Upcoming',
+  result_text TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS points_table (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  team_name VARCHAR(255) NOT NULL UNIQUE,
+  group_name VARCHAR(10) DEFAULT 'A',
+  played INT DEFAULT 0,
+  won INT DEFAULT 0,
+  lost INT DEFAULT 0,
+  tied INT DEFAULT 0,
+  points INT DEFAULT 0,
+  nrr DECIMAL(10,3) DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS news (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  title VARCHAR(255) NOT NULL,
+  body TEXT NOT NULL,
+  published TINYINT(1) DEFAULT 1,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS gallery (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  title VARCHAR(255),
+  image_path TEXT NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
