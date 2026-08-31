@@ -22,8 +22,13 @@ except ImportError:
 BASE = Path(__file__).resolve().parent
 DATABASE_URL = os.environ["DATABASE_URL"]
 app = Flask(__name__, static_folder="static", template_folder="templates")
-app.secret_key = os.environ.get("UPL_SECRET_KEY", secrets.token_hex(32))
-app.config["MAX_CONTENT_LENGTH"] = 8 * 1024 * 1024
+app.secret_key = os.environ.get("UPL_SECRET_KEY") or secrets.token_hex(32)
+app.config.update(
+    MAX_CONTENT_LENGTH=8 * 1024 * 1024,
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=os.environ.get("COOKIE_SECURE", "1") == "1",
+)
 cloudinary.config(cloud_name=os.environ.get("CLOUDINARY_CLOUD_NAME"), api_key=os.environ.get("CLOUDINARY_API_KEY"), api_secret=os.environ.get("CLOUDINARY_API_SECRET"), secure=True)
 PANCHAYATS=["Uttar Laxmipur","Mothabari","Uttar Panchanandapur-I","Uttar Panchanandapur-II","Gangaprasad","Bangitola","Rathbari","Hamidpur","Rajnagar"]
 ROLES={"Batter","Bowler","All-Rounder"}; BATTING={"Right-hand Batsman","Left-hand Batsman"}; BOWLING={"Right-hand Bowling","Left-hand Bowling"}
@@ -76,7 +81,6 @@ def register(): return jsonify(ok=False,error='Please use the secure payment reg
 @app.get('/team-registration')
 def team_registration(): return render_template('team_registration.html',razorpay_key_id=os.environ.get('RAZORPAY_KEY_ID',''))
 
-
 @app.post('/api/team-interest/manual-submit')
 def team_interest_manual_submit():
     c = None
@@ -90,62 +94,32 @@ def team_interest_manual_submit():
         panchayat = f.get('panchayat', '').strip()
         image = request.files.get('payment_screenshot')
         allowed = {'.jpg', '.jpeg', '.png'}
-
         if not all([team_name, contact_name, email, village, panchayat]) or len(phone) != 10:
             return jsonify(ok=False, error='Please complete all required fields with a valid 10-digit phone number.'), 400
         if not image or not image.filename or Path(image.filename).suffix.lower() not in allowed:
             return jsonify(ok=False, error='Please upload a JPG or PNG payment screenshot.'), 400
-
         c = db()
-        # Self-heal older PostgreSQL schemas before inserting the application.
         c.execute('ALTER TABLE team_interest ADD COLUMN IF NOT EXISTS payment_screenshot_url TEXT')
         interest_no = next_team_interest(c)
-
         screenshot_url = None
-        cloudinary_error = None
-        cloud_name = os.environ.get('CLOUDINARY_CLOUD_NAME')
-        api_key = os.environ.get('CLOUDINARY_API_KEY')
-        api_secret = os.environ.get('CLOUDINARY_API_SECRET')
-
-        # Prefer Cloudinary, but do not make registration fail when Cloudinary
-        # is missing/misconfigured. A local copy keeps the application usable.
+        cloud_name = os.environ.get('CLOUDINARY_CLOUD_NAME'); api_key = os.environ.get('CLOUDINARY_API_KEY'); api_secret = os.environ.get('CLOUDINARY_API_SECRET')
         if cloud_name and api_key and api_secret:
             try:
-                image.stream.seek(0)
-                uploaded = cloudinary.uploader.upload(
-                    image,
-                    folder='upl/team-payments',
-                    resource_type='image'
-                )
-                screenshot_url = uploaded.get('secure_url')
+                image.stream.seek(0); uploaded = cloudinary.uploader.upload(image, folder='upl/team-payments', resource_type='image'); screenshot_url = uploaded.get('secure_url')
             except Exception as upload_error:
-                cloudinary_error = repr(upload_error)
-                screenshot_url = None
-
+                print('CLOUDINARY TEAM UPLOAD ERROR:', repr(upload_error))
         if not screenshot_url:
-            upload_dir = BASE / 'static' / 'uploads' / 'team-payments'
-            upload_dir.mkdir(parents=True, exist_ok=True)
-            ext = Path(image.filename).suffix.lower()
-            local_name = f"{secrets.token_hex(12)}{ext}"
-            local_path = upload_dir / local_name
-            image.stream.seek(0)
-            image.save(str(local_path))
-            screenshot_url = f'/static/uploads/team-payments/{local_name}'
-
-        c.execute(
-            'INSERT INTO team_interest(interest_no,team_name,contact_name,phone,email,village,gram_panchayat,registration_fee,interest_charge,payment_status,status,paid_amount,payment_screenshot_url) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',
-            (interest_no, team_name, contact_name, phone, email, village, panchayat, 5000, 100, 'Submitted', 'Interested', 100, screenshot_url)
-        )
-        c.commit()
-        return jsonify(ok=True, interest_no=interest_no)
+            upload_dir = BASE / 'static' / 'uploads' / 'team-payments'; upload_dir.mkdir(parents=True, exist_ok=True)
+            ext = Path(image.filename).suffix.lower(); local_name = f"{secrets.token_hex(12)}{ext}"; local_path = upload_dir / local_name
+            image.stream.seek(0); image.save(str(local_path)); screenshot_url = f'/static/uploads/team-payments/{local_name}'
+        c.execute('INSERT INTO team_interest(interest_no,team_name,contact_name,phone,email,village,gram_panchayat,registration_fee,interest_charge,payment_status,status,paid_amount,payment_screenshot_url) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',(interest_no, team_name, contact_name, phone, email, village, panchayat, 5000, 100, 'Submitted', 'Interested', 100, screenshot_url))
+        c.commit(); return jsonify(ok=True, interest_no=interest_no)
     except Exception as e:
-        print('TEAM MANUAL SUBMIT ERROR:', repr(e))
-        if c:
-            c.rollback()
+        print('TEAM MANUAL SUBMIT ERROR:', repr(e));
+        if c: c.rollback()
         return jsonify(ok=False, error='Unable to submit registration right now. Please try again.'), 500
     finally:
-        if c:
-            c.close()
+        if c: c.close()
 
 @app.get('/teams')
 def teams():
@@ -251,8 +225,7 @@ def team_interest_status(id,status):
 @admin_required
 def fixture_add():
     f=request.form; c=db()
-    try:
-        c.execute('INSERT INTO fixtures(match_no,team1,team2,match_date,match_time,venue,status,result_text) VALUES(?,?,?,?,?,?,?,?)',(f.get('match_no') or None,f.get('team1','').strip(),f.get('team2','').strip(),f.get('date') or None,f.get('time') or None,f.get('venue') or 'Uttar Lakshmipur High School',f.get('status') or 'Upcoming',f.get('result') or '')); c.commit()
+    try: c.execute('INSERT INTO fixtures(match_no,team1,team2,match_date,match_time,venue,status,result_text) VALUES(?,?,?,?,?,?,?,?)',(f.get('match_no') or None,f.get('team1','').strip(),f.get('team2','').strip(),f.get('date') or None,f.get('time') or None,f.get('venue') or 'Uttar Lakshmipur High School',f.get('status') or 'Upcoming',f.get('result') or '')); c.commit()
     finally: c.close()
     return redirect('/admin')
 @app.post('/admin/fixture/<int:id>/edit')
@@ -262,8 +235,7 @@ def fixture_edit(id):
     if status not in {'Upcoming','Live','Completed'}: return redirect('/admin')
     if status=='Completed' and not result: result='Result not entered yet.'
     c=db()
-    try:
-        c.execute('UPDATE fixtures SET match_no=?,team1=?,team2=?,match_date=?,match_time=?,venue=?,status=?,result_text=? WHERE id=?',(f.get('match_no') or None,team1,team2,f.get('date') or None,f.get('time') or None,f.get('venue') or 'Uttar Lakshmipur High School',status,result,id)); c.commit()
+    try: c.execute('UPDATE fixtures SET match_no=?,team1=?,team2=?,match_date=?,match_time=?,venue=?,status=?,result_text=? WHERE id=?',(f.get('match_no') or None,team1,team2,f.get('date') or None,f.get('time') or None,f.get('venue') or 'Uttar Lakshmipur High School',status,result,id)); c.commit()
     finally: c.close()
     return redirect('/admin')
 @app.post('/admin/fixture/delete/<int:id>')
@@ -273,47 +245,32 @@ def fixture_delete(id):
     try: c.execute('DELETE FROM fixtures WHERE id=?',(id,)); c.commit()
     finally: c.close()
     return redirect('/admin')
-
 @app.post('/admin/news/<int:id>/edit')
 @admin_required
 def news_edit(id):
-    title=request.form.get('title','').strip()
-    body=request.form.get('body','').strip()
-    c=db()
+    title=request.form.get('title','').strip(); body=request.form.get('body','').strip(); c=db()
     try:
-        if title and body:
-            c.execute('UPDATE news SET title=?, body=? WHERE id=?',(title,body,id))
-            c.commit()
-    finally:
-        c.close()
+        if title and body: c.execute('UPDATE news SET title=?, body=? WHERE id=?',(title,body,id)); c.commit()
+    finally: c.close()
     return redirect('/admin')
-
 @app.post('/admin/gallery/<int:id>/edit')
 @admin_required
 def gallery_edit(id):
-    title=request.form.get('title','').strip()
-    image=request.files.get('image')
-    c=None
+    title=request.form.get('title','').strip(); image=request.files.get('image'); c=None
     try:
         if image and image.filename:
-            if Path(image.filename).suffix.lower() not in {'.jpg','.jpeg','.png','.webp'}:
-                return redirect('/admin')
-            if not os.environ.get('CLOUDINARY_CLOUD_NAME'):
-                return redirect('/admin')
-            r=cloudinary.uploader.upload(image,folder='upl/gallery',resource_type='image')
-            c=db()
-            c.execute('UPDATE gallery SET title=?, image_path=? WHERE id=?',(title,r['secure_url'],id))
+            if Path(image.filename).suffix.lower() not in {'.jpg','.jpeg','.png','.webp'}: return redirect('/admin')
+            if not os.environ.get('CLOUDINARY_CLOUD_NAME'): return redirect('/admin')
+            r=cloudinary.uploader.upload(image,folder='upl/gallery',resource_type='image'); c=db(); c.execute('UPDATE gallery SET title=?, image_path=? WHERE id=?',(title,r['secure_url'],id))
         else:
-            c=db()
-            c.execute('UPDATE gallery SET title=? WHERE id=?',(title,id))
+            c=db(); c.execute('UPDATE gallery SET title=? WHERE id=?',(title,id))
         c.commit()
     except Exception as e:
-        print('GALLERY EDIT ERROR:',repr(e))
+        print('GALLERY EDIT ERROR:',repr(e));
         if c: c.rollback()
     finally:
         if c: c.close()
     return redirect('/admin')
-
 @app.post('/admin/news/add')
 @admin_required
 def news_add():
@@ -367,13 +324,14 @@ def gallery_delete(id):
     return redirect('/admin')
 @app.get('/health')
 def health(): return jsonify(status='ok',service='UPL Website')
-if __name__=='__main__': app.run(host='0.0.0.0',port=int(os.environ.get('PORT',5000)),debug=False)
 
 @app.after_request
-def add_admin_delete_controls(response):
-    if request.path == '/admin' and response.content_type.startswith('text/html'):
-        script = """<style>.admin-delete-btn{margin-left:6px!important;background:#5b1720!important;color:#fff!important;border:1px solid #8b2330!important}</style><script>document.addEventListener('DOMContentLoaded',function(){function addDelete(section,endpoint,confirmText){var box=document.getElementById(section);if(!box)return;box.querySelectorAll('table tbody tr').forEach(function(row){var cells=row.querySelectorAll('td');if(!cells.length)return;var idMatch=row.innerHTML.match(/(?:player|team-interest)\/(\d+)/);if(!idMatch)return;var id=idMatch[1];var cell=cells[cells.length-1];if(cell.querySelector('.admin-delete-btn'))return;var form=document.createElement('form');form.method='post';form.action=endpoint.replace('__ID__',id);form.style.display='inline';var b=document.createElement('button');b.type='submit';b.className='btn small danger admin-delete-btn';b.textContent='DELETE';b.onclick=function(){return confirm(confirmText)};form.appendChild(b);cell.appendChild(form);});}addDelete('players','/admin/player/__ID__/delete','Delete this player registration permanently?');addDelete('team-applications','/admin/team-interest/__ID__/delete','Delete this team application permanently?');});</script>"""
-        data = response.get_data(as_text=True)
-        data = data.replace('</body>', script + '</body>')
-        response.set_data(data)
+def add_security_headers(response):
+    response.headers.setdefault('X-Content-Type-Options', 'nosniff')
+    response.headers.setdefault('X-Frame-Options', 'SAMEORIGIN')
+    response.headers.setdefault('Referrer-Policy', 'strict-origin-when-cross-origin')
+    if request.is_secure:
+        response.headers.setdefault('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
     return response
+
+if __name__=='__main__': app.run(host='0.0.0.0',port=int(os.environ.get('PORT',5000)),debug=False)
