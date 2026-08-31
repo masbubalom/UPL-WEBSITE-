@@ -1,0 +1,105 @@
+CREATE TABLE admins (
+  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  username VARCHAR(100) NOT NULL UNIQUE,
+  password_hash VARCHAR(255) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE players (
+  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  registration_no VARCHAR(50) NOT NULL UNIQUE,
+  full_name VARCHAR(150) NOT NULL,
+  age INT NOT NULL,
+  phone VARCHAR(20) NOT NULL UNIQUE,
+  email VARCHAR(190) NOT NULL UNIQUE,
+  village VARCHAR(150) NOT NULL,
+  gram_panchayat VARCHAR(150) NOT NULL,
+  primary_role VARCHAR(30) NOT NULL,
+  batting_style VARCHAR(50) NULL,
+  bowling_style VARCHAR(50) NULL,
+  photo_path VARCHAR(500) NULL,
+  payment_status VARCHAR(30) DEFAULT 'Paid',
+  razorpay_order_id VARCHAR(100) NULL,
+  razorpay_payment_id VARCHAR(100) NULL,
+  paid_amount INT DEFAULT 0,
+  status VARCHAR(30) DEFAULT 'Pending',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE teams (
+  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(150) NOT NULL UNIQUE,
+  description TEXT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE fixtures (
+  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  match_no VARCHAR(50), team1 VARCHAR(150), team2 VARCHAR(150),
+  match_date VARCHAR(30), match_time VARCHAR(30), venue VARCHAR(255),
+  status VARCHAR(30), result_text TEXT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE news (
+  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  title VARCHAR(255) NOT NULL,
+  body TEXT NOT NULL,
+  published TINYINT(1) DEFAULT 1,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE points_table (
+  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  team_name VARCHAR(150) NOT NULL UNIQUE,
+  group_name VARCHAR(5) DEFAULT 'A',
+  played INT DEFAULT 0, won INT DEFAULT 0, lost INT DEFAULT 0, tied INT DEFAULT 0,
+  points INT DEFAULT 0, nrr DOUBLE DEFAULT 0
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE gallery (
+  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  title VARCHAR(255) NULL,
+  image_path VARCHAR(500) NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE team_interest (
+  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  interest_no VARCHAR(60) NOT NULL UNIQUE,
+  team_name VARCHAR(150) NOT NULL,
+  representative_name VARCHAR(150) NULL,
+  contact_name VARCHAR(150) NULL,
+  phone VARCHAR(20) NOT NULL,
+  email VARCHAR(190) NOT NULL,
+  village VARCHAR(150) NOT NULL,
+  gram_panchayat VARCHAR(150) NOT NULL,
+  interest_amount INT DEFAULT 100,
+  registration_fee INT DEFAULT 5000,
+  interest_charge INT DEFAULT 100,
+  payment_status VARCHAR(30) DEFAULT 'Pending',
+  payment_reference VARCHAR(150) NULL,
+  razorpay_order_id VARCHAR(100) NULL,
+  razorpay_payment_id VARCHAR(100) NULL,
+  paid_amount INT DEFAULT 0,
+  payment_screenshot_url VARCHAR(500) NULL,
+  status VARCHAR(30) DEFAULT 'Pending',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE player_payment (
+  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  registration_no VARCHAR(50) NOT NULL UNIQUE,
+  full_name VARCHAR(150) NOT NULL,
+  age INT NOT NULL,
+  phone VARCHAR(20) NOT NULL,
+  email VARCHAR(190) NOT NULL,
+  village VARCHAR(150) NOT NULL,
+  gram_panchayat VARCHAR(150) NOT NULL,
+  primary_role VARCHAR(30) NOT NULL,
+  batting_style VARCHAR(50) NULL,
+  bowling_style VARCHAR(50) NULL,
+  photo_path VARCHAR(500) NULL,
+  amount INT NOT NULL DEFAULT 100,
+  payment_status VARCHAR(30) DEFAULT 'Created',
+  razorpay_order_id VARCHAR(100) UNIQUE,
+  razorpay_payment_id VARCHAR(100) NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
