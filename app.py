@@ -450,7 +450,7 @@ def auction_players_payload(c):
     return c.execute("""SELECT p.id,p.registration_no,p.full_name,p.age,p.village,p.gram_panchayat,
         p.primary_role,p.batting_style,p.bowling_style,p.photo_path
         FROM players p LEFT JOIN auction_results ar ON ar.player_id=p.id
-        WHERE p.status='Approved' AND (ar.result IS NULL OR ar.result='Unsold')
+        WHERE p.status='Approved' AND ar.result IS NULL
         ORDER BY p.full_name""").fetchall()
 
 @app.get('/admin/auction-control')
@@ -485,7 +485,7 @@ def auction_select_player():
     try:
         ensure_auction_tables(c)
         p=c.execute("""SELECT p.id FROM players p LEFT JOIN auction_results ar ON ar.player_id=p.id
-            WHERE p.id=? AND p.status='Approved' AND (ar.result IS NULL OR ar.result='Unsold')""",(player_id,)).fetchone()
+            WHERE p.id=? AND p.status='Approved' AND ar.result IS NULL""",(player_id,)).fetchone()
         if not p: c.rollback(); return jsonify(ok=False,error='Player is not approved or is already sold.'),400
         c.execute("UPDATE auction_control_state SET current_player_id=?,current_bid=?,status='Live',highest_team_id=NULL,increment=?,base_price=?,updated_at=CURRENT_TIMESTAMP WHERE id=1",(player_id,base,inc,base))
         c.commit(); return jsonify(ok=True,message='Player is live.',state=auction_state_payload(c),teams=auction_teams_payload(c))
