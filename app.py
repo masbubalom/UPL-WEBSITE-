@@ -377,3 +377,190 @@ def add_admin_delete_controls(response):
         data = data.replace('</body>', script + '</body>')
         response.set_data(data)
     return response
+
+
+# Dedicated live-auction control module. Kept separate from registration and tournament admin flows.
+def ensure_auction_tables(c):
+    c.execute("""CREATE TABLE IF NOT EXISTS auction_control_state (
+        id INTEGER PRIMARY KEY CHECK (id=1),
+        current_player_id INTEGER,
+        current_bid INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'Waiting',
+        highest_team_id INTEGER,
+        increment INTEGER NOT NULL DEFAULT 25,
+        base_price INTEGER NOT NULL DEFAULT 400,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )""")
+    c.execute("""INSERT INTO auction_control_state(id) VALUES(1) ON CONFLICT(id) DO NOTHING""")
+    c.execute("""CREATE TABLE IF NOT EXISTS auction_bids (
+        id SERIAL PRIMARY KEY,
+        player_id INTEGER NOT NULL,
+        team_id INTEGER NOT NULL,
+        amount INTEGER NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS auction_results (
+        id SERIAL PRIMARY KEY,
+        player_id INTEGER UNIQUE NOT NULL,
+        result TEXT NOT NULL CHECK(result IN ('Sold','Unsold')),
+        team_id INTEGER,
+        final_price INTEGER NOT NULL DEFAULT 0,
+        finalized_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )""")
+
+def auction_state_payload(c):
+    ensure_auction_tables(c)
+    s = c.execute("""SELECT s.*, p.registration_no,p.full_name,p.age,p.village,p.gram_panchayat,
+        p.primary_role,p.batting_style,p.bowling_style,p.photo_path,
+        t.name AS highest_team_name
+        FROM auction_control_state s
+        LEFT JOIN players p ON p.id=s.current_player_id
+        LEFT JOIN teams t ON t.id=s.highest_team_id WHERE s.id=1""").fetchone()
+    player = None
+    if s and s.get('current_player_id') and s.get('full_name'):
+        player = {k:s.get(k) for k in ('id','registration_no','full_name','age','village','gram_panchayat','primary_role','batting_style','bowling_style','photo_path')}
+        player['id'] = s['current_player_id']
+    bids = []
+    if s and s.get('current_player_id'):
+        bids = c.execute("""SELECT b.id,b.amount,b.created_at,t.name AS team_name,t.id AS team_id
+            FROM auction_bids b JOIN teams t ON t.id=b.team_id
+            WHERE b.player_id=? ORDER BY b.id""",(s['current_player_id'],)).fetchall()
+    return {'current_player_id':s.get('current_player_id') if s else None,
+        'current_bid':int(s.get('current_bid') or 0) if s else 0,
+        'status':s.get('status','Waiting') if s else 'Waiting',
+        'highest_team_id':s.get('highest_team_id') if s else None,
+        'highest_team_name':s.get('highest_team_name') if s else None,
+        'increment':int(s.get('increment') or 25) if s else 25,
+        'base_price':int(s.get('base_price') or 400) if s else 400,
+        'player':player,'bids':[dict(b) for b in bids]}
+
+def auction_teams_payload(c):
+    ensure_auction_tables(c)
+    rows=c.execute("""SELECT t.id,t.name,
+        COALESCE(SUM(CASE WHEN ar.result='Sold' THEN ar.final_price ELSE 0 END),0) AS spent,
+        COUNT(CASE WHEN ar.result='Sold' THEN 1 END) AS player_count
+        FROM teams t LEFT JOIN auction_results ar ON ar.team_id=t.id
+        GROUP BY t.id,t.name ORDER BY t.name""").fetchall()
+    return [{'id':r['id'],'name':r['name'],'spent':int(r['spent'] or 0),
+        'remaining_budget':max(0,15000-int(r['spent'] or 0)),
+        'player_count':int(r['player_count'] or 0)} for r in rows]
+
+def auction_players_payload(c):
+    ensure_auction_tables(c)
+    return c.execute("""SELECT p.id,p.registration_no,p.full_name,p.age,p.village,p.gram_panchayat,
+        p.primary_role,p.batting_style,p.bowling_style,p.photo_path
+        FROM players p LEFT JOIN auction_results ar ON ar.player_id=p.id
+        WHERE p.status='Approved' AND (ar.result IS NULL OR ar.result='Unsold')
+        ORDER BY p.full_name""").fetchall()
+
+@app.get('/admin/auction-control')
+@admin_required
+def auction_control_page():
+    return render_template('auction_control.html')
+
+@app.get('/admin/api/auction/bootstrap')
+@admin_required
+def auction_bootstrap():
+    c=db()
+    try:
+        ensure_auction_tables(c); c.commit()
+        return jsonify(ok=True,teams=auction_teams_payload(c),players=[dict(p) for p in auction_players_payload(c)],
+            state=auction_state_payload(c))
+    finally: c.close()
+
+@app.get('/admin/api/auction/state')
+@admin_required
+def auction_state_api():
+    c=db()
+    try:
+        ensure_auction_tables(c); c.commit()
+        return jsonify(ok=True,teams=auction_teams_payload(c),state=auction_state_payload(c))
+    finally: c.close()
+
+@app.post('/admin/api/auction/select')
+@admin_required
+def auction_select_player():
+    data=request.get_json(silent=True) or {}; player_id=int(data.get('player_id') or 0)
+    base=max(1,int(data.get('base_price') or 400)); inc=max(1,int(data.get('increment') or 25)); c=db()
+    try:
+        ensure_auction_tables(c)
+        p=c.execute("""SELECT p.id FROM players p LEFT JOIN auction_results ar ON ar.player_id=p.id
+            WHERE p.id=? AND p.status='Approved' AND (ar.result IS NULL OR ar.result='Unsold')""",(player_id,)).fetchone()
+        if not p: c.rollback(); return jsonify(ok=False,error='Player is not approved or is already sold.'),400
+        c.execute("UPDATE auction_control_state SET current_player_id=?,current_bid=?,status='Live',highest_team_id=NULL,increment=?,base_price=?,updated_at=CURRENT_TIMESTAMP WHERE id=1",(player_id,base,inc,base))
+        c.commit(); return jsonify(ok=True,message='Player is live.',state=auction_state_payload(c),teams=auction_teams_payload(c))
+    except Exception as e:
+        c.rollback(); app.logger.exception('auction select failed'); return jsonify(ok=False,error='Could not load player.'),500
+    finally: c.close()
+
+@app.post('/admin/api/auction/bid')
+@admin_required
+def auction_record_bid():
+    data=request.get_json(silent=True) or {}; team_id=int(data.get('team_id') or 0)
+    inc=max(1,int(data.get('increment') or 25)); base=max(1,int(data.get('base_price') or 400)); c=db()
+    try:
+        ensure_auction_tables(c)
+        s=c.execute("SELECT * FROM auction_control_state WHERE id=1 FOR UPDATE").fetchone()
+        if not s or not s['current_player_id'] or s['status']!='Live':
+            c.rollback(); return jsonify(ok=False,error='Load a player and set the auction LIVE first.'),400
+        team=c.execute('SELECT id FROM teams WHERE id=?',(team_id,)).fetchone()
+        if not team: c.rollback(); return jsonify(ok=False,error='Team not found.'),400
+        spent=c.execute("SELECT COALESCE(SUM(final_price),0) AS spent FROM auction_results WHERE result='Sold' AND team_id=?",(team_id,)).fetchone()['spent']
+        if int(spent or 0)>=15000: c.rollback(); return jsonify(ok=False,error='This team has no remaining budget.'),400
+        previous=c.execute('SELECT COUNT(*) AS n FROM auction_bids WHERE player_id=?',(s['current_player_id'],)).fetchone()['n']
+        amount=(int(s['current_bid'])+inc) if previous else int(s['base_price'] or base)
+        if amount>15000-int(spent or 0): c.rollback(); return jsonify(ok=False,error='Bid exceeds this team’s remaining budget.'),400
+        c.execute('INSERT INTO auction_bids(player_id,team_id,amount) VALUES(?,?,?)',(s['current_player_id'],team_id,amount))
+        c.execute("UPDATE auction_control_state SET current_bid=?,highest_team_id=?,increment=?,base_price=?,updated_at=CURRENT_TIMESTAMP WHERE id=1",(amount,team_id,inc,base))
+        c.commit(); return jsonify(ok=True,message='Bid recorded: ₹'+str(amount),state=auction_state_payload(c),teams=auction_teams_payload(c))
+    except Exception:
+        c.rollback(); app.logger.exception('auction bid failed'); return jsonify(ok=False,error='Could not record bid. Please retry.'),500
+    finally: c.close()
+
+@app.post('/admin/api/auction/undo')
+@admin_required
+def auction_undo_bid():
+    c=db()
+    try:
+        ensure_auction_tables(c); s=c.execute("SELECT * FROM auction_control_state WHERE id=1 FOR UPDATE").fetchone()
+        if not s or not s['current_player_id']: c.rollback(); return jsonify(ok=False,error='No current player.'),400
+        last=c.execute('SELECT id FROM auction_bids WHERE player_id=? ORDER BY id DESC LIMIT 1',(s['current_player_id'],)).fetchone()
+        if not last: c.rollback(); return jsonify(ok=False,error='There is no bid to undo.'),400
+        c.execute('DELETE FROM auction_bids WHERE id=?',(last['id'],))
+        prev=c.execute('SELECT team_id,amount FROM auction_bids WHERE player_id=? ORDER BY id DESC LIMIT 1',(s['current_player_id'],)).fetchone()
+        amount=int(prev['amount']) if prev else int(s['base_price'] or 400); team_id=prev['team_id'] if prev else None
+        c.execute('UPDATE auction_control_state SET current_bid=?,highest_team_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=1',(amount,team_id))
+        c.commit(); return jsonify(ok=True,message='Last bid undone.',state=auction_state_payload(c),teams=auction_teams_payload(c))
+    except Exception:
+        c.rollback(); app.logger.exception('auction undo failed'); return jsonify(ok=False,error='Could not undo bid.'),500
+    finally: c.close()
+
+@app.post('/admin/api/auction/finalize')
+@admin_required
+def auction_finalize_player():
+    data=request.get_json(silent=True) or {}; result=data.get('result'); c=db()
+    if result not in {'Sold','Unsold'}: return jsonify(ok=False,error='Invalid auction result.'),400
+    try:
+        ensure_auction_tables(c); s=c.execute("SELECT * FROM auction_control_state WHERE id=1 FOR UPDATE").fetchone()
+        if not s or not s['current_player_id'] or s['status']!='Live': c.rollback(); return jsonify(ok=False,error='No live player to finalize.'),400
+        if result=='Sold' and not s['highest_team_id']: c.rollback(); return jsonify(ok=False,error='Record a team bid before marking SOLD.'),400
+        c.execute("""INSERT INTO auction_results(player_id,result,team_id,final_price) VALUES(?,?,?,?)
+            ON CONFLICT(player_id) DO UPDATE SET result=EXCLUDED.result,team_id=EXCLUDED.team_id,final_price=EXCLUDED.final_price,finalized_at=CURRENT_TIMESTAMP""",
+            (s['current_player_id'],result,s['highest_team_id'] if result=='Sold' else None,int(s['current_bid'] or 0) if result=='Sold' else 0))
+        c.execute("UPDATE auction_control_state SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=1",(result,))
+        c.commit(); return jsonify(ok=True,message='Player marked '+result+'.',state=auction_state_payload(c),teams=auction_teams_payload(c))
+    except Exception:
+        c.rollback(); app.logger.exception('auction finalize failed'); return jsonify(ok=False,error='Could not finalize player.'),500
+    finally: c.close()
+
+@app.post('/admin/api/auction/next')
+@admin_required
+def auction_next_player():
+    c=db()
+    try:
+        ensure_auction_tables(c)
+        c.execute("UPDATE auction_control_state SET current_player_id=NULL,current_bid=0,status='Waiting',highest_team_id=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=1")
+        c.commit(); return jsonify(ok=True,message='Ready for the next player. Select them from the list.',state=auction_state_payload(c),teams=auction_teams_payload(c),players=[dict(p) for p in auction_players_payload(c)])
+    except Exception:
+        c.rollback(); app.logger.exception('auction next failed'); return jsonify(ok=False,error='Could not advance auction.'),500
+    finally: c.close()
