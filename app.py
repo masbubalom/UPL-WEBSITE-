@@ -367,7 +367,7 @@ def gallery_delete(id):
     return redirect('/admin')
 @app.get('/health')
 def health(): return jsonify(status='ok',service='UPL Website')
-if __name__=='__main__': app.run(host='0.0.0.0',port=int(os.environ.get('PORT',5000)),debug=False)
+
 
 @app.after_request
 def add_admin_delete_controls(response):
@@ -564,3 +564,6 @@ def auction_next_player():
     except Exception:
         c.rollback(); app.logger.exception('auction next failed'); return jsonify(ok=False,error='Could not advance auction.'),500
     finally: c.close()
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), debug=False)
