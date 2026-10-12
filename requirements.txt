@@ -5,3 +5,4 @@ Werkzeug
 razorpay
 gspread
 google-auth
+gunicorn
